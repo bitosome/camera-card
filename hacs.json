@@ -1,0 +1,6 @@
+{
+  "name": "Camera Card",
+  "render_readme": true,
+  "filename": "camera-card.js",
+  "homeassistant": "2026.8.0"
+}

@@ -1,0 +1,115 @@
+import { describe, expect, it } from 'vitest';
+import {
+  createDefaultModel,
+  normalizeFocusedConfig,
+  serializeFocusedConfig,
+} from '../../src/focused/config';
+
+describe('focused configuration', () => {
+  it('reads main and HD cameras as one pair', () => {
+    const model = normalizeFocusedConfig({
+      type: 'custom:camera-card',
+      cameras: [
+        {
+          camera_entity: 'camera.main',
+          title: 'Driveway',
+          dependencies: { cameras: ['driveway_hd'] },
+        },
+        {
+          camera_entity: 'camera.hd',
+          id: 'driveway_hd',
+          capabilities: { disable_except: ['substream'] },
+        },
+      ],
+    });
+
+    expect(model.cameras).toEqual([
+      { title: 'Driveway', main: 'camera.main', hd: 'camera.hd' },
+    ]);
+  });
+
+  it('serializes only the focused runtime configuration', () => {
+    const model = createDefaultModel('camera.main');
+    model.cameras[0].title = 'Front';
+    model.cameras[0].hd = 'camera.hd';
+    model.settings.preset_groups.push({
+      camera: 'camera.main',
+      device_id: 'device-1',
+      x: 50,
+      y: 88,
+      spacing: 12,
+      presets: [{ name: 'Home', icon: 'mdi:home' }],
+    });
+
+    const config = serializeFocusedConfig(model);
+
+    expect(config).toEqual({
+      type: 'custom:camera-card',
+      cameras: [
+        {
+          camera_entity: 'camera.main',
+          title: 'Front',
+          live_provider: 'ha',
+          dependencies: { cameras: ['focused_camera_1_hd'] },
+        },
+        {
+          camera_entity: 'camera.hd',
+          id: 'focused_camera_1_hd',
+          title: 'Front HD',
+          live_provider: 'ha',
+          capabilities: { disable_except: ['substream'] },
+        },
+      ],
+      focused: model.settings,
+    });
+  });
+
+  it('keeps incomplete preset rows while they are edited', () => {
+    const model = normalizeFocusedConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+      focused: {
+        preset_groups: [
+          {
+            camera: 'camera.main',
+            device_id: '',
+            x: 50,
+            y: 88,
+            spacing: 12,
+            presets: [{ name: 'Home', icon: 'mdi:home' }],
+          },
+        ],
+      },
+    });
+
+    expect(model.settings.preset_groups).toHaveLength(1);
+    expect(model.settings.preset_groups[0].device_id).toBe('');
+  });
+
+  it('normalizes editable percentage strings to bounded numbers', () => {
+    const model = normalizeFocusedConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+      focused: {
+        substream: {
+          enabled: true,
+          icon: 'mdi:video-high-definition',
+          active_icon: 'mdi:standard-definition',
+          x: '42',
+          y: '120',
+        },
+        fullscreen: {
+          enabled: true,
+          icon: 'mdi:fullscreen',
+          active_icon: 'mdi:fullscreen-exit',
+          x: '',
+          y: '8',
+        },
+      },
+    });
+
+    expect(model.settings.substream.x).toBe(42);
+    expect(model.settings.substream.y).toBe(100);
+    expect(model.settings.fullscreen.x).toBe(94);
+  });
+});

@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2021",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2021", "dom", "dom.iterable"],
+    "strict": true,
+    "noEmit": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "sourceMap": true
+  },
+  "include": ["src/focused/**/*.ts"],
+  "exclude": ["dist", "tests"]
+}

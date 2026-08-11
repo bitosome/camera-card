@@ -1,0 +1,50 @@
+---
+name: 'Build'
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Test build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node and Yarn
+        uses: volta-cli/action@v4
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Lint
+        run: yarn run lint
+
+      - name: Check formatting
+        run: yarn run format-check
+
+      - name: Test
+        run: yarn run test
+
+      - name: Build
+        run: yarn run build
+
+      - name: HACS build validation
+        uses: 'hacs/action@21.12.1'
+        with:
+          category: 'plugin'
+
+          # Don't attempt to load into HACS (as it loads the release, not the
+          # build).
+          ignore: 'hacs'
+
+      - name: Upload javascript
+        uses: actions/upload-artifact@v4
+        with:
+          name: camera-card
+          path: dist/*.js
