@@ -26,8 +26,12 @@ export interface FocusedOverlayButton {
   enabled: boolean;
   icon: string;
   active_icon: string;
+}
+
+export interface FocusedControlGroup {
   x: FocusedPosition;
   y: FocusedPosition;
+  spacing: FocusedPosition;
 }
 
 export interface FocusedPreset {
@@ -46,6 +50,7 @@ export interface FocusedPresetGroup {
 
 export interface FocusedSettings {
   button_size: number;
+  controls: FocusedControlGroup;
   substream: FocusedOverlayButton;
   fullscreen: FocusedOverlayButton;
   preset_groups: FocusedPresetGroup[];
@@ -71,6 +76,7 @@ export interface RawFocusedCamera {
 
 export interface RawFocusedSettings {
   button_size?: number;
+  controls?: Partial<FocusedControlGroup>;
   substream?: Partial<FocusedOverlayButton>;
   fullscreen?: Partial<FocusedOverlayButton>;
   preset_groups?: FocusedPresetGroup[];

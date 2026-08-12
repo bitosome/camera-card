@@ -7,6 +7,7 @@ import {
 } from './config.js';
 import type {
   FocusedCameraPair,
+  FocusedControlGroup,
   FocusedModel,
   FocusedOverlayButton,
   FocusedPreset,
@@ -45,7 +46,7 @@ const cameraSelector = (): FormSchema['selector'] => ({
   entity: { filter: { domain: 'camera' } },
 });
 const positionSelector = (): FormSchema['selector'] => ({
-  text: { type: 'number', suffix: '%' },
+  text: { suffix: '%' },
 });
 
 const CAMERA_SCHEMA: readonly FormSchema[] = [
@@ -69,8 +70,20 @@ const BUTTON_SCHEMA: readonly FormSchema[] = [
         required: true,
         selector: iconSelector('mdi:check-circle'),
       },
-      { name: 'x', required: true, selector: positionSelector() },
-      { name: 'y', required: true, selector: positionSelector() },
+    ],
+  },
+];
+
+const CONTROL_SCHEMA: readonly FormSchema[] = [
+  {
+    type: 'grid',
+    name: '',
+    flatten: true,
+    column_min_width: '140px',
+    schema: [
+      { name: 'x', selector: positionSelector() },
+      { name: 'y', selector: positionSelector() },
+      { name: 'spacing', selector: positionSelector() },
     ],
   },
 ];
@@ -114,8 +127,12 @@ const BUTTON_LABELS: Record<string, string> = {
   enabled: 'Show button',
   icon: 'Normal icon',
   active_icon: 'Active icon',
-  x: 'Horizontal position',
+};
+
+const CONTROL_LABELS: Record<string, string> = {
+  x: 'Row center',
   y: 'Vertical position',
+  spacing: 'Button spacing',
 };
 
 const PRESET_LABELS: Record<string, string> = {
@@ -226,6 +243,12 @@ export class CameraCardEditor extends LitElement {
   ): void {
     this._mutate((model) => {
       model.settings[button] = value;
+    });
+  }
+
+  private _updateControls(value: FocusedControlGroup): void {
+    this._mutate((model) => {
+      model.settings.controls = value;
     });
   }
 
@@ -413,8 +436,6 @@ export class CameraCardEditor extends LitElement {
         {
           icon: 'Icon shown while the mode is off.',
           active_icon: 'Icon shown while HD or fullscreen mode is active.',
-          x: 'Percentage from the left edge of the camera.',
-          y: 'Percentage from the top edge of the camera.',
         },
       )}
     </div>`;
@@ -446,9 +467,9 @@ export class CameraCardEditor extends LitElement {
             required: true,
             selector: { device: { filter: { integration: 'unifiprotect' } } },
           },
-          { name: 'x', required: true, selector: positionSelector() },
-          { name: 'y', required: true, selector: positionSelector() },
-          { name: 'spacing', required: true, selector: positionSelector() },
+          { name: 'x', selector: positionSelector() },
+          { name: 'y', selector: positionSelector() },
+          { name: 'spacing', selector: positionSelector() },
         ],
       },
     ];
@@ -621,6 +642,23 @@ export class CameraCardEditor extends LitElement {
               (model) => (model.settings.button_size = value.button_size as number),
             ),
         )}
+        <div class="subsection">
+          <h4>Control row</h4>
+          <p class="helper">
+            Positions the HD/SD and fullscreen buttons together, like a preset row.
+          </p>
+          ${this._form(
+            this._model.settings.controls as unknown as FormData,
+            CONTROL_SCHEMA,
+            CONTROL_LABELS,
+            (value) => this._updateControls(value as unknown as FocusedControlGroup),
+            {
+              x: 'Horizontal center of the complete control row.',
+              y: 'Percentage from the top edge of the camera.',
+              spacing: 'Percentage between adjacent control buttons.',
+            },
+          )}
+        </div>
         ${this._renderButtonEditor(
           'substream',
           'HD stream button',

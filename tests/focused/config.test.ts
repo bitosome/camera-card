@@ -86,30 +86,19 @@ describe('focused configuration', () => {
     expect(model.settings.preset_groups[0].device_id).toBe('');
   });
 
-  it('normalizes editable percentage strings to bounded numbers', () => {
+  it('preserves blank and partial percentage drafts', () => {
     const model = normalizeFocusedConfig({
       type: 'custom:camera-card',
       cameras: [{ camera_entity: 'camera.main' }],
       focused: {
-        substream: {
-          enabled: true,
-          icon: 'mdi:video-high-definition',
-          active_icon: 'mdi:standard-definition',
-          x: '42',
-          y: '120',
-        },
-        fullscreen: {
-          enabled: true,
-          icon: 'mdi:fullscreen',
-          active_icon: 'mdi:fullscreen-exit',
+        controls: {
           x: '',
-          y: '8',
+          y: '89',
+          spacing: '1',
         },
       },
     });
 
-    expect(model.settings.substream.x).toBe(42);
-    expect(model.settings.substream.y).toBe(100);
-    expect(model.settings.fullscreen.x).toBe(94);
+    expect(model.settings.controls).toEqual({ x: '', y: '89', spacing: '1' });
   });
 });

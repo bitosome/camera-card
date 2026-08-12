@@ -7,9 +7,9 @@ PTZ presets.
 
 - Main and HD Home Assistant camera streams.
 - Reorderable camera navigation.
-- Fullscreen with a dedicated active/exit icon.
+- Fullscreen with a dedicated active/exit icon and a mobile fallback.
 - Customizable icons, button size, and percentage-based positions.
-- Per-camera UniFi Protect PTZ preset rows.
+- Per-camera UniFi Protect PTZ preset rows with persistent active highlighting.
 - Reorderable presets with an explicit name and icon for every preset.
 - Native Home Assistant forms and selectors throughout the visual editor.
 
@@ -52,11 +52,16 @@ The HD and fullscreen controls each provide:
 - Show/hide toggle.
 - Normal icon.
 - Active/return icon.
-- Horizontal position (`0`–`100`).
-- Vertical position (`0`–`100`).
 
-Positions are percentages of the camera surface. The fullscreen active icon
-exits fullscreen when clicked.
+The controls share one row layout:
+
+- Horizontal row center (`0`–`100`).
+- Vertical position (`0`–`100`).
+- Spacing between buttons (`0`–`100`).
+
+Position fields can be emptied while typing. Values are interpreted as percentages of
+the camera surface when the card renders. The fullscreen active icon exits fullscreen
+when clicked, including when the browser requires the mobile fallback.
 
 ### Preset controls
 
@@ -99,18 +104,18 @@ cameras:
         - substream
 focused:
   button_size: 34
+  controls:
+    x: 90
+    y: 8
+    spacing: 8
   substream:
     enabled: true
     icon: mdi:high-definition
     active_icon: mdi:standard-definition
-    x: 86
-    y: 8
   fullscreen:
     enabled: true
     icon: mdi:fullscreen
     active_icon: mdi:fullscreen-exit
-    x: 94
-    y: 8
   preset_groups:
     - camera: camera.driveway_medium
       device_id: unifi-protect-device-id

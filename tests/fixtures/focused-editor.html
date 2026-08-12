@@ -292,19 +292,20 @@
         ],
         focused: {
           button_size: 36,
+          controls: {
+            x: 90,
+            y: 8,
+            spacing: 8,
+          },
           substream: {
             enabled: true,
             icon: 'mdi:high-definition',
             active_icon: 'mdi:standard-definition',
-            x: 86,
-            y: 8,
           },
           fullscreen: {
             enabled: true,
             icon: 'mdi:fullscreen',
             active_icon: 'mdi:fullscreen-exit',
-            x: 94,
-            y: 8,
           },
           preset_groups: [
             {
@@ -368,6 +369,7 @@
           2,
         );
         card.setConfig(event.detail.config);
+        editor.setConfig(event.detail.config);
       });
     </script>
   </body>

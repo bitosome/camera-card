@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CameraCard,
   callUniFiPreset,
   isFocusedCardFullscreen,
+  resolvePercentage,
   toggleFocusedCardFullscreen,
   type FocusedFullscreenAPI,
 } from '../../src/focused/card';
@@ -42,5 +44,62 @@ describe('focused card', () => {
     await toggleFocusedCardFullscreen(api, card);
     expect(api.exit).toHaveBeenCalledOnce();
     expect(isFocusedCardFullscreen(api, card)).toBe(false);
+  });
+
+  it('falls back when native fullscreen is unavailable', async () => {
+    const api: FocusedFullscreenAPI = {
+      isEnabled: false,
+      isFullscreen: false,
+      request: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    await expect(
+      toggleFocusedCardFullscreen(api, document.createElement('div')),
+    ).resolves.toBe(false);
+    expect(api.request).not.toHaveBeenCalled();
+  });
+
+  it('uses safe runtime values without rewriting editable drafts', () => {
+    expect(resolvePercentage('', 90)).toBe(90);
+    expect(resolvePercentage('35', 90)).toBe(35);
+    expect(resolvePercentage('120', 90)).toBe(100);
+  });
+
+  it('uses and exits the viewport fallback when native fullscreen is unavailable', async () => {
+    const card = new CameraCard();
+    card.hass = {
+      states: {
+        'camera.main': {
+          entity_id: 'camera.main',
+          state: 'streaming',
+          attributes: {},
+        },
+      },
+      callService: vi.fn(),
+    };
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+    });
+    document.body.append(card);
+    await card.updateComplete;
+
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')
+      ?.click();
+    await Promise.resolve();
+    await card.updateComplete;
+    expect(card.hasAttribute('data-fullscreen-fallback')).toBe(true);
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Exit fullscreen"]'),
+    ).not.toBeNull();
+
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Exit fullscreen"]')
+      ?.click();
+    await card.updateComplete;
+    expect(card.hasAttribute('data-fullscreen-fallback')).toBe(false);
+    card.remove();
   });
 });

@@ -11,19 +11,20 @@ import type {
 
 const DEFAULT_SETTINGS: FocusedSettings = {
   button_size: 34,
+  controls: {
+    x: 90,
+    y: 8,
+    spacing: 8,
+  },
   substream: {
     enabled: true,
     icon: 'mdi:high-definition',
     active_icon: 'mdi:standard-definition',
-    x: 86,
-    y: 8,
   },
   fullscreen: {
     enabled: true,
     icon: 'mdi:fullscreen',
     active_icon: 'mdi:fullscreen-exit',
-    x: 94,
-    y: 8,
   },
   preset_groups: [],
 };
@@ -51,6 +52,13 @@ const asNumber = (
     : fallback;
 };
 
+const asPosition = (value: unknown, fallback: number): number | string => {
+  if (typeof value === 'string') {
+    return value;
+  }
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+};
+
 const normalizeButton = (
   value: unknown,
   fallback: FocusedOverlayButton,
@@ -60,8 +68,6 @@ const normalizeButton = (
     enabled: typeof button?.enabled === 'boolean' ? button.enabled : fallback.enabled,
     icon: asString(button?.icon, fallback.icon),
     active_icon: asString(button?.active_icon, fallback.active_icon),
-    x: asNumber(button?.x, Number(fallback.x), 0, 100),
-    y: asNumber(button?.y, Number(fallback.y), 0, 100),
   };
 };
 
@@ -80,9 +86,9 @@ const normalizePresetGroup = (value: unknown): FocusedPresetGroup | null => {
   return {
     camera,
     device_id: asString(group?.device_id),
-    x: asNumber(group?.x, 50, 0, 100),
-    y: asNumber(group?.y, 88, 0, 100),
-    spacing: asNumber(group?.spacing, 12, 0, 100),
+    x: asPosition(group?.x, 50),
+    y: asPosition(group?.y, 88),
+    spacing: asPosition(group?.spacing, 12),
     presets: Array.isArray(group?.presets)
       ? group.presets
           .map(normalizePreset)
@@ -128,6 +134,11 @@ export const normalizeFocusedConfig = (config: RawFocusedConfig): FocusedModel =
     cameras: getCameraPairs(config),
     settings: {
       button_size: asNumber(focused?.button_size, DEFAULT_SETTINGS.button_size, 24, 80),
+      controls: {
+        x: asPosition(asRecord(focused?.controls)?.x, 90),
+        y: asPosition(asRecord(focused?.controls)?.y, 8),
+        spacing: asPosition(asRecord(focused?.controls)?.spacing, 8),
+      },
       substream: normalizeButton(focused?.substream, DEFAULT_SETTINGS.substream),
       fullscreen: normalizeButton(focused?.fullscreen, DEFAULT_SETTINGS.fullscreen),
       preset_groups: Array.isArray(focused?.preset_groups)

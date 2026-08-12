@@ -7,6 +7,7 @@ import type {
   FocusedCameraPair,
   CameraCardEditor,
   FocusedOverlayButton,
+  FocusedPosition,
   FocusedPresetGroup,
   HomeAssistant,
   RawFocusedConfig,
@@ -39,18 +40,31 @@ export const isFocusedCardFullscreen = (
 export const toggleFocusedCardFullscreen = async (
   api: FocusedFullscreenAPI,
   element: Element,
-): Promise<void> => {
+): Promise<boolean> => {
   if (!api.isEnabled) {
-    throw new Error('Fullscreen is not supported by this browser.');
+    return false;
   }
   if (api.isFullscreen) {
     await api.exit();
   } else {
     await api.request(element);
   }
+  return true;
 };
 
-const buttonStyle = (button: FocusedOverlayButton, size: number) => ({
+interface PositionedOverlayButton extends FocusedOverlayButton {
+  x: number;
+  y: number;
+}
+
+export const resolvePercentage = (value: FocusedPosition, fallback: number): number => {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) && String(value).trim() !== ''
+    ? Math.min(100, Math.max(0, number))
+    : fallback;
+};
+
+const buttonStyle = (button: PositionedOverlayButton, size: number) => ({
   left: `${button.x}%`,
   top: `${button.y}%`,
   width: `${size}px`,
@@ -92,7 +106,11 @@ export class CameraCard extends LitElement {
   @state()
   private _error = '';
 
+  @state()
+  private _activePresets: Record<string, string> = {};
+
   private _loadingElements?: Promise<void>;
+  private _documentOverflow = '';
 
   public static async getConfigElement(): Promise<CameraCardEditor> {
     await import('./editor.js');
@@ -147,6 +165,7 @@ export class CameraCard extends LitElement {
     if (screenfull.isEnabled) {
       screenfull.off('change', this._fullscreenChanged);
     }
+    this._setFallbackFullscreen(false);
     super.disconnectedCallback();
   }
 
@@ -201,11 +220,34 @@ export class CameraCard extends LitElement {
   }
 
   private async _toggleFullscreen(): Promise<void> {
-    try {
-      await toggleFocusedCardFullscreen(screenfull, this);
-    } catch (error) {
-      this._error = error instanceof Error ? error.message : 'Fullscreen failed.';
+    if (this.hasAttribute('data-fullscreen-fallback')) {
+      this._setFallbackFullscreen(false);
+      return;
     }
+    try {
+      const nativeFullscreen = await toggleFocusedCardFullscreen(screenfull, this);
+      if (!nativeFullscreen) {
+        this._setFallbackFullscreen(true);
+      }
+    } catch {
+      this._setFallbackFullscreen(true);
+    }
+  }
+
+  private _setFallbackFullscreen(active: boolean): void {
+    if (active === this.hasAttribute('data-fullscreen-fallback')) {
+      return;
+    }
+    if (active) {
+      this._documentOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+      this.setAttribute('data-fullscreen-fallback', '');
+    } else {
+      document.documentElement.style.overflow = this._documentOverflow;
+      this.removeAttribute('data-fullscreen-fallback');
+    }
+    this._fullscreen = active;
+    this._error = '';
   }
 
   private async _goToPreset(group: FocusedPresetGroup, preset: string): Promise<void> {
@@ -214,6 +256,7 @@ export class CameraCard extends LitElement {
     }
     try {
       await callUniFiPreset(this.hass, group.device_id, preset);
+      this._activePresets = { ...this._activePresets, [group.camera]: preset };
       this._error = '';
     } catch (error) {
       this._error = error instanceof Error ? error.message : 'Preset action failed.';
@@ -221,7 +264,7 @@ export class CameraCard extends LitElement {
   }
 
   private _renderOverlayButton(
-    button: FocusedOverlayButton,
+    button: PositionedOverlayButton,
     size: number,
     label: string,
     action: () => void,
@@ -252,12 +295,61 @@ export class CameraCard extends LitElement {
           enabled: true,
           icon: preset.icon,
           active_icon: preset.icon,
-          x: Number(group.x) + (index - centerOffset) * Number(group.spacing),
-          y: group.y,
+          x:
+            resolvePercentage(group.x, 50) +
+            (index - centerOffset) * resolvePercentage(group.spacing, 12),
+          y: resolvePercentage(group.y, 88),
         },
         size,
         preset.name,
         () => void this._goToPreset(group, preset.name),
+        this._activePresets[group.camera] === preset.name,
+      ),
+    );
+  }
+
+  private _renderControls(
+    pair: FocusedCameraPair,
+    model: ReturnType<typeof normalizeFocusedConfig>,
+  ): Array<TemplateResult | typeof nothing> {
+    const controls = [
+      ...(pair.hd && model.settings.substream.enabled
+        ? [
+            {
+              button: model.settings.substream,
+              label: this._hd ? 'Use main stream' : 'Use HD stream',
+              action: () => this._toggleSubstream(),
+              active: this._hd,
+            },
+          ]
+        : []),
+      ...(model.settings.fullscreen.enabled
+        ? [
+            {
+              button: model.settings.fullscreen,
+              label: this._fullscreen ? 'Exit fullscreen' : 'Enter fullscreen',
+              action: () => void this._toggleFullscreen(),
+              active: this._fullscreen,
+            },
+          ]
+        : []),
+    ];
+    const center = resolvePercentage(model.settings.controls.x, 90);
+    const y = resolvePercentage(model.settings.controls.y, 8);
+    const spacing = resolvePercentage(model.settings.controls.spacing, 8);
+    const centerOffset = (controls.length - 1) / 2;
+    return controls.map((control, index) =>
+      this._renderOverlayButton(
+        {
+          ...control.button,
+          enabled: true,
+          x: center + (index - centerOffset) * spacing,
+          y,
+        },
+        model.settings.button_size,
+        control.label,
+        control.action,
+        control.active,
       ),
     );
   }
@@ -313,22 +405,7 @@ export class CameraCard extends LitElement {
               </button>
             `
           : nothing}
-        ${pair.hd
-          ? this._renderOverlayButton(
-              model.settings.substream,
-              model.settings.button_size,
-              this._hd ? 'Use main stream' : 'Use HD stream',
-              () => this._toggleSubstream(),
-              this._hd,
-            )
-          : nothing}
-        ${this._renderOverlayButton(
-          model.settings.fullscreen,
-          model.settings.button_size,
-          this._fullscreen ? 'Exit fullscreen' : 'Enter fullscreen',
-          () => void this._toggleFullscreen(),
-          this._fullscreen,
-        )}
+        ${this._renderControls(pair, model)}
         ${presetGroup?.device_id
           ? this._renderPresets(presetGroup, model.settings.button_size)
           : nothing}
@@ -340,6 +417,15 @@ export class CameraCard extends LitElement {
   static styles = css`
     :host {
       display: block;
+    }
+
+    :host([data-fullscreen-fallback]) {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      width: 100vw;
+      height: 100dvh;
+      background: black;
     }
 
     ha-card,
@@ -358,7 +444,7 @@ export class CameraCard extends LitElement {
 
     .camera.fullscreen {
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       aspect-ratio: auto;
     }
 
