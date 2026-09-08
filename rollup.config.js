@@ -16,6 +16,7 @@ const config = {
     entryFileNames: 'camera-card.js',
     chunkFileNames: '[name]-[hash].js',
     format: 'es',
+    inlineDynamicImports: !development,
     sourcemap: development,
   },
   plugins: [
