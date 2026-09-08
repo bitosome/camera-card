@@ -7,7 +7,7 @@ recordings, and PTZ presets.
 
 - Main and HD Home Assistant camera streams.
 - Per-camera UniFi Protect recording playback with a 24-hour scrubber, exact
-  date/time selection, and 15-minute previous/next controls.
+  date/time selection, and continuous short-clip playback.
 - Reorderable camera navigation.
 - Fullscreen with a dedicated active/exit icon and a mobile fallback.
 - Customizable icons, button size, and percentage-based positions.
@@ -72,7 +72,9 @@ the most recent five minutes and provides:
 
 - A scrubber covering the previous 24 hours.
 - An exact local date and time field for older footage.
-- Previous and next 15-minute clip buttons.
+- Previous and next 10-second buttons. Playback automatically continues with the
+  following clip, avoiding the long wait and very large download produced by a
+  single lengthy UniFi export.
 - Native video controls and a **Live** button.
 
 Playback uses Home Assistant's authenticated UniFi Protect video endpoint; camera

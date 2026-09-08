@@ -66,18 +66,18 @@ interface PositionedOverlayButton extends FocusedOverlayButton {
   y: number;
 }
 
-const RECORDING_CLIP_MINUTES = 15;
+const RECORDING_CLIP_SECONDS = 10;
 const RECORDING_SCRUB_MINUTES = 24 * 60;
 
 export const recordingClipWindow = (
   requestedStart: number,
   now = Date.now(),
 ): { start: Date; end: Date } => {
-  const latestStart = now - 60_000;
+  const latestStart = now - RECORDING_CLIP_SECONDS * 1000;
   const start = Math.min(requestedStart, latestStart);
   return {
     start: new Date(start),
-    end: new Date(Math.min(start + RECORDING_CLIP_MINUTES * 60_000, now)),
+    end: new Date(Math.min(start + RECORDING_CLIP_SECONDS * 1000, now)),
   };
 };
 
@@ -352,12 +352,15 @@ export class CameraCard extends LitElement {
     if (!Number.isFinite(timestamp)) {
       return;
     }
-    this._recordingStart = Math.min(timestamp, Date.now() - 60_000);
+    this._recordingStart = Math.min(
+      timestamp,
+      Date.now() - RECORDING_CLIP_SECONDS * 1000,
+    );
     void this._loadRecording(cameraEntity);
   }
 
-  private _shiftRecording(minutes: number, cameraEntity: string): void {
-    this._selectRecordingTime(this._recordingStart + minutes * 60_000, cameraEntity);
+  private _shiftRecording(seconds: number, cameraEntity: string): void {
+    this._selectRecordingTime(this._recordingStart + seconds * 1000, cameraEntity);
   }
 
   private async _toggleFullscreen(): Promise<void> {
@@ -524,18 +527,18 @@ export class CameraCard extends LitElement {
       <div class="recording-controls-row">
         <button
           class="recording-action"
-          title="Previous 15 minutes"
-          aria-label="Previous 15 minutes"
-          @click=${() => this._shiftRecording(-RECORDING_CLIP_MINUTES, pair.main)}
+          title="Previous 10 seconds"
+          aria-label="Previous 10 seconds"
+          @click=${() => this._shiftRecording(-RECORDING_CLIP_SECONDS, pair.main)}
         >
-          <ha-icon icon="mdi:rewind-15"></ha-icon>
+          <ha-icon icon="mdi:rewind-10"></ha-icon>
         </button>
         <input
           class="recording-datetime"
           type="datetime-local"
           aria-label="Recording date and time"
           .value=${toLocalDateTimeValue(this._recordingStart)}
-          max=${toLocalDateTimeValue(now - 60_000)}
+          max=${toLocalDateTimeValue(now - RECORDING_CLIP_SECONDS * 1000)}
           @change=${(event: Event) => {
             const value = (event.currentTarget as HTMLInputElement).value;
             this._selectRecordingTime(new Date(value).getTime(), pair.main);
@@ -543,11 +546,11 @@ export class CameraCard extends LitElement {
         />
         <button
           class="recording-action"
-          title="Next 15 minutes"
-          aria-label="Next 15 minutes"
-          @click=${() => this._shiftRecording(RECORDING_CLIP_MINUTES, pair.main)}
+          title="Next 10 seconds"
+          aria-label="Next 10 seconds"
+          @click=${() => this._shiftRecording(RECORDING_CLIP_SECONDS, pair.main)}
         >
-          <ha-icon icon="mdi:fast-forward-15"></ha-icon>
+          <ha-icon icon="mdi:fast-forward-10"></ha-icon>
         </button>
         <button class="live-action" @click=${this._closeRecording}>
           <span class="live-dot"></span>Live
@@ -598,6 +601,7 @@ export class CameraCard extends LitElement {
                 muted
                 playsinline
                 @canplay=${() => (this._recordingLoading = false)}
+                @ended=${() => this._shiftRecording(RECORDING_CLIP_SECONDS, pair.main)}
                 @error=${() => {
                   this._recordingLoading = false;
                   this._error =
@@ -787,7 +791,7 @@ export class CameraCard extends LitElement {
 
     .recording-controls {
       position: absolute;
-      top: 52px;
+      bottom: 56px;
       left: 50%;
       z-index: 4;
       display: grid;
@@ -863,7 +867,7 @@ export class CameraCard extends LitElement {
 
     @media (max-width: 600px) {
       .recording-controls {
-        top: 48px;
+        bottom: 52px;
         width: calc(100% - 64px);
         padding: 6px;
       }

@@ -75,9 +75,9 @@ describe('focused card', () => {
     const { start, end } = recordingClipWindow(requested, now);
 
     expect(start.toISOString()).toBe('2026-09-08T11:50:00.000Z');
-    expect(end.toISOString()).toBe('2026-09-08T12:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-09-08T11:50:10.000Z');
     expect(createUniFiRecordingPath('entry-1', 'camera.driveway', start, end)).toBe(
-      '/api/unifiprotect/video/entry-1/camera.driveway/2026-09-08T11%3A50%3A00.000Z/2026-09-08T12%3A00%3A00.000Z',
+      '/api/unifiprotect/video/entry-1/camera.driveway/2026-09-08T11%3A50%3A00.000Z/2026-09-08T11%3A50%3A10.000Z',
     );
   });
 
@@ -85,7 +85,7 @@ describe('focused card', () => {
     const now = Date.parse('2026-09-08T12:00:00.000Z');
     const { start, end } = recordingClipWindow(now + 60_000, now);
 
-    expect(start.getTime()).toBe(now - 60_000);
+    expect(start.getTime()).toBe(now - 10_000);
     expect(end.getTime()).toBe(now);
     expect(toLocalDateTimeValue(start.getTime())).toMatch(/^2026-09-08T\d{2}:\d{2}$/);
   });
