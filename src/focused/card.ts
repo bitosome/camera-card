@@ -17,6 +17,15 @@ interface CardHelpers {
   createCardElement(config: Record<string, unknown>): Promise<HTMLElement>;
 }
 
+interface EntityRegistryEntry {
+  config_entry_id?: string | null;
+  platform?: string;
+}
+
+interface SignedPath {
+  path: string;
+}
+
 declare global {
   interface Window {
     loadCardHelpers?: () => Promise<CardHelpers>;
@@ -57,6 +66,35 @@ interface PositionedOverlayButton extends FocusedOverlayButton {
   y: number;
 }
 
+const RECORDING_CLIP_MINUTES = 15;
+const RECORDING_SCRUB_MINUTES = 24 * 60;
+
+export const recordingClipWindow = (
+  requestedStart: number,
+  now = Date.now(),
+): { start: Date; end: Date } => {
+  const latestStart = now - 60_000;
+  const start = Math.min(requestedStart, latestStart);
+  return {
+    start: new Date(start),
+    end: new Date(Math.min(start + RECORDING_CLIP_MINUTES * 60_000, now)),
+  };
+};
+
+export const createUniFiRecordingPath = (
+  configEntryID: string,
+  cameraEntity: string,
+  start: Date,
+  end: Date,
+): string =>
+  `/api/unifiprotect/video/${encodeURIComponent(configEntryID)}/${encodeURIComponent(cameraEntity)}/${encodeURIComponent(start.toISOString())}/${encodeURIComponent(end.toISOString())}`;
+
+export const toLocalDateTimeValue = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const part = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+};
+
 export const resolvePercentage = (value: FocusedPosition, fallback: number): number => {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) && String(value).trim() !== ''
@@ -65,8 +103,8 @@ export const resolvePercentage = (value: FocusedPosition, fallback: number): num
 };
 
 const buttonStyle = (button: PositionedOverlayButton, size: number) => ({
-  left: `${button.x}%`,
-  top: `${button.y}%`,
+  left: `clamp(${size / 2}px, ${button.x}%, calc(100% - ${size / 2}px))`,
+  top: `clamp(${size / 2}px, ${button.y}%, calc(100% - ${size / 2}px))`,
   width: `${size}px`,
   height: `${size}px`,
   '--focused-icon-size': `${Math.round(size * 0.65)}px`,
@@ -109,8 +147,22 @@ export class CameraCard extends LitElement {
   @state()
   private _activePresets: Record<string, string> = {};
 
+  @state()
+  private _recordingMode = false;
+
+  @state()
+  private _recordingStart = Date.now() - 5 * 60_000;
+
+  @state()
+  private _recordingUrl = '';
+
+  @state()
+  private _recordingLoading = false;
+
   private _loadingElements?: Promise<void>;
   private _documentOverflow = '';
+  private _recordingRequest = 0;
+  private _configEntryIDs = new Map<string, string>();
 
   public static async getConfigElement(): Promise<CameraCardEditor> {
     await import('./editor.js');
@@ -165,6 +217,7 @@ export class CameraCard extends LitElement {
     if (screenfull.isEnabled) {
       screenfull.off('change', this._fullscreenChanged);
     }
+    this._recordingRequest += 1;
     this._setFallbackFullscreen(false);
     super.disconnectedCallback();
   }
@@ -202,13 +255,18 @@ export class CameraCard extends LitElement {
   }
 
   private _selectCamera(offset: number): void {
-    const count = this._getModel()?.cameras.length ?? 0;
+    const model = this._getModel();
+    const count = model?.cameras.length ?? 0;
     if (count < 2) {
       return;
     }
-    this._cameraIndex = (this._cameraIndex + offset + count) % count;
+    const nextIndex = (this._cameraIndex + offset + count) % count;
+    this._cameraIndex = nextIndex;
     this._hd = false;
     this._error = '';
+    if (this._recordingMode && model) {
+      void this._loadRecording(model.cameras[nextIndex].main);
+    }
   }
 
   private _toggleSubstream(): void {
@@ -217,6 +275,89 @@ export class CameraCard extends LitElement {
       this._hd = !this._hd;
       this._error = '';
     }
+  }
+
+  private _closeRecording(): void {
+    this._recordingRequest += 1;
+    this._recordingMode = false;
+    this._recordingUrl = '';
+    this._recordingLoading = false;
+    this._error = '';
+  }
+
+  private _toggleRecording(pair: FocusedCameraPair): void {
+    if (this._recordingMode) {
+      this._closeRecording();
+      return;
+    }
+    this._recordingMode = true;
+    this._recordingStart = Date.now() - 5 * 60_000;
+    void this._loadRecording(pair.main);
+  }
+
+  private async _configEntryID(cameraEntity: string): Promise<string> {
+    const cached = this._configEntryIDs.get(cameraEntity);
+    if (cached) {
+      return cached;
+    }
+    if (!this.hass?.callWS) {
+      throw new Error('Home Assistant recording API is unavailable.');
+    }
+    const entry = await this.hass.callWS<EntityRegistryEntry>({
+      type: 'config/entity_registry/get',
+      entity_id: cameraEntity,
+    });
+    if (entry.platform !== 'unifiprotect' || !entry.config_entry_id) {
+      throw new Error('Recordings require a UniFi Protect camera entity.');
+    }
+    this._configEntryIDs.set(cameraEntity, entry.config_entry_id);
+    return entry.config_entry_id;
+  }
+
+  private async _loadRecording(cameraEntity: string): Promise<void> {
+    if (!this.hass || !this._recordingMode) {
+      return;
+    }
+    const request = ++this._recordingRequest;
+    this._recordingLoading = true;
+    this._recordingUrl = '';
+    this._error = '';
+    try {
+      const configEntryID = await this._configEntryID(cameraEntity);
+      const { start, end } = recordingClipWindow(this._recordingStart);
+      const unsignedPath = createUniFiRecordingPath(
+        configEntryID,
+        cameraEntity,
+        start,
+        end,
+      );
+      const signed = await this.hass.callWS<SignedPath>({
+        type: 'auth/sign_path',
+        path: unsignedPath,
+        expires: 3600,
+      });
+      if (request === this._recordingRequest && this._recordingMode) {
+        this._recordingUrl = signed.path;
+      }
+    } catch (error) {
+      if (request === this._recordingRequest) {
+        this._recordingLoading = false;
+        this._error =
+          error instanceof Error ? error.message : 'Could not load recording.';
+      }
+    }
+  }
+
+  private _selectRecordingTime(timestamp: number, cameraEntity: string): void {
+    if (!Number.isFinite(timestamp)) {
+      return;
+    }
+    this._recordingStart = Math.min(timestamp, Date.now() - 60_000);
+    void this._loadRecording(cameraEntity);
+  }
+
+  private _shiftRecording(minutes: number, cameraEntity: string): void {
+    this._selectRecordingTime(this._recordingStart + minutes * 60_000, cameraEntity);
   }
 
   private async _toggleFullscreen(): Promise<void> {
@@ -313,13 +454,23 @@ export class CameraCard extends LitElement {
     model: ReturnType<typeof normalizeFocusedConfig>,
   ): Array<TemplateResult | typeof nothing> {
     const controls = [
-      ...(pair.hd && model.settings.substream.enabled
+      ...(pair.hd && model.settings.substream.enabled && !this._recordingMode
         ? [
             {
               button: model.settings.substream,
               label: this._hd ? 'Use main stream' : 'Use HD stream',
               action: () => this._toggleSubstream(),
               active: this._hd,
+            },
+          ]
+        : []),
+      ...(model.settings.recording.enabled
+        ? [
+            {
+              button: model.settings.recording,
+              label: this._recordingMode ? 'Return to live view' : 'View recordings',
+              action: () => this._toggleRecording(pair),
+              active: this._recordingMode,
             },
           ]
         : []),
@@ -358,6 +509,70 @@ export class CameraCard extends LitElement {
     return this._hd && pair.hd ? pair.hd : pair.main;
   }
 
+  private _renderRecordingControls(pair: FocusedCameraPair): TemplateResult {
+    const now = Date.now();
+    const minutesFromNow = Math.max(
+      -RECORDING_SCRUB_MINUTES,
+      Math.min(-1, Math.round((this._recordingStart - now) / 60_000)),
+    );
+    const label = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(this._recordingStart);
+
+    return html`<div class="recording-controls">
+      <div class="recording-controls-row">
+        <button
+          class="recording-action"
+          title="Previous 15 minutes"
+          aria-label="Previous 15 minutes"
+          @click=${() => this._shiftRecording(-RECORDING_CLIP_MINUTES, pair.main)}
+        >
+          <ha-icon icon="mdi:rewind-15"></ha-icon>
+        </button>
+        <input
+          class="recording-datetime"
+          type="datetime-local"
+          aria-label="Recording date and time"
+          .value=${toLocalDateTimeValue(this._recordingStart)}
+          max=${toLocalDateTimeValue(now - 60_000)}
+          @change=${(event: Event) => {
+            const value = (event.currentTarget as HTMLInputElement).value;
+            this._selectRecordingTime(new Date(value).getTime(), pair.main);
+          }}
+        />
+        <button
+          class="recording-action"
+          title="Next 15 minutes"
+          aria-label="Next 15 minutes"
+          @click=${() => this._shiftRecording(RECORDING_CLIP_MINUTES, pair.main)}
+        >
+          <ha-icon icon="mdi:fast-forward-15"></ha-icon>
+        </button>
+        <button class="live-action" @click=${this._closeRecording}>
+          <span class="live-dot"></span>Live
+        </button>
+      </div>
+      <div class="recording-scrubber-row">
+        <input
+          class="recording-scrubber"
+          type="range"
+          min=${-RECORDING_SCRUB_MINUTES}
+          max="-1"
+          step="1"
+          .value=${String(minutesFromNow)}
+          aria-label="Recording time within the last 24 hours"
+          @input=${(event: Event) => {
+            const minutes = Number((event.currentTarget as HTMLInputElement).value);
+            this._recordingStart = Date.now() + minutes * 60_000;
+          }}
+          @change=${() => void this._loadRecording(pair.main)}
+        />
+        <span>${label}</span>
+      </div>
+    </div>`;
+  }
+
   protected render(): TemplateResult {
     const model = this._getModel();
     const pair = model?.cameras[this._cameraIndex];
@@ -373,18 +588,38 @@ export class CameraCard extends LitElement {
 
     return html`<ha-card>
       <div class="camera ${this._fullscreen ? 'fullscreen' : ''}">
-        ${!this._elementsReady
-          ? html`<div class="message">Loading camera stream…</div>`
-          : !stateObj
-            ? html`<div class="message">Camera entity not found: ${entity}</div>`
-            : stateObj.state === 'unavailable'
-              ? html`<div class="message">${pair.title} is unavailable</div>`
-              : html`<ha-camera-stream
-                  .hass=${this.hass}
-                  .stateObj=${stateObj}
-                  .controls=${false}
-                  .muted=${true}
-                ></ha-camera-stream>`}
+        ${this._recordingMode
+          ? this._recordingUrl
+            ? html`<video
+                class="recording-video"
+                src=${this._recordingUrl}
+                autoplay
+                controls
+                muted
+                playsinline
+                @canplay=${() => (this._recordingLoading = false)}
+                @error=${() => {
+                  this._recordingLoading = false;
+                  this._error =
+                    'Recording could not be played. UniFi Protect media requires Full access mode and available footage.';
+                }}
+              ></video>`
+            : nothing
+          : !this._elementsReady
+            ? html`<div class="message">Loading camera stream…</div>`
+            : !stateObj
+              ? html`<div class="message">Camera entity not found: ${entity}</div>`
+              : stateObj.state === 'unavailable'
+                ? html`<div class="message">${pair.title} is unavailable</div>`
+                : html`<ha-camera-stream
+                    .hass=${this.hass}
+                    .stateObj=${stateObj}
+                    .controls=${false}
+                    .muted=${true}
+                  ></ha-camera-stream>`}
+        ${this._recordingMode && this._recordingLoading
+          ? html`<div class="message recording-loading">Loading recording…</div>`
+          : nothing}
         ${model.cameras.length > 1
           ? html`
               <button
@@ -406,7 +641,8 @@ export class CameraCard extends LitElement {
             `
           : nothing}
         ${this._renderControls(pair, model)}
-        ${presetGroup?.device_id
+        ${this._recordingMode ? this._renderRecordingControls(pair) : nothing}
+        ${!this._recordingMode && presetGroup?.device_id
           ? this._renderPresets(presetGroup, model.settings.button_size)
           : nothing}
         ${this._error ? html`<div class="error">${this._error}</div>` : nothing}
@@ -454,6 +690,14 @@ export class CameraCard extends LitElement {
       height: 100%;
     }
 
+    .recording-video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: black;
+    }
+
     .message {
       position: absolute;
       inset: 0;
@@ -462,6 +706,11 @@ export class CameraCard extends LitElement {
       padding: 24px;
       color: var(--secondary-text-color, #bdbdbd);
       text-align: center;
+    }
+
+    .recording-loading {
+      z-index: 1;
+      pointer-events: none;
     }
 
     button {
@@ -535,6 +784,109 @@ export class CameraCard extends LitElement {
       background: var(--error-color, #db4437);
       font-size: 12px;
     }
+
+    .recording-controls {
+      position: absolute;
+      top: 52px;
+      left: 50%;
+      z-index: 4;
+      display: grid;
+      width: min(620px, calc(100% - 96px));
+      gap: 6px;
+      padding: 8px;
+      transform: translateX(-50%);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.66);
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(6px);
+    }
+
+    .recording-controls-row,
+    .recording-scrubber-row {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .recording-action,
+    .live-action {
+      display: inline-flex;
+      min-width: 34px;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .recording-action ha-icon {
+      --mdc-icon-size: 22px;
+    }
+
+    .recording-datetime {
+      min-width: 0;
+      height: 34px;
+      flex: 1;
+      padding: 0 8px;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      border-radius: 4px;
+      color: white;
+      color-scheme: dark;
+      background: rgba(0, 0, 0, 0.18);
+      font: inherit;
+    }
+
+    .live-action {
+      gap: 6px;
+      font-weight: 600;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--error-color, #db4437);
+    }
+
+    .recording-scrubber {
+      min-width: 80px;
+      flex: 1;
+      accent-color: var(--primary-color, #03a9f4);
+    }
+
+    .recording-scrubber-row span {
+      min-width: max-content;
+      font-size: 12px;
+    }
+
+    @media (max-width: 600px) {
+      .recording-controls {
+        top: 48px;
+        width: calc(100% - 64px);
+        padding: 6px;
+      }
+
+      .recording-controls-row {
+        gap: 4px;
+      }
+
+      .recording-action,
+      .live-action {
+        height: 32px;
+        padding: 0 6px;
+      }
+
+      .recording-datetime {
+        height: 32px;
+        font-size: 12px;
+      }
+
+      .recording-scrubber-row span {
+        display: none;
+      }
+    }
   `;
 }
 
@@ -542,6 +894,6 @@ window.customCards = window.customCards ?? [];
 window.customCards.push({
   type: 'camera-card',
   name: 'Camera Card',
-  description: 'Minimal HA live camera card with HD streams and PTZ presets.',
+  description: 'Minimal HA camera card with UniFi Protect recordings and PTZ presets.',
   preview: true,
 });

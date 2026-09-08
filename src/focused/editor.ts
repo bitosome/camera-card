@@ -238,7 +238,7 @@ export class CameraCardEditor extends LitElement {
   }
 
   private _updateButton(
-    button: 'substream' | 'fullscreen',
+    button: 'substream' | 'recording' | 'fullscreen',
     value: FocusedOverlayButton,
   ): void {
     this._mutate((model) => {
@@ -420,7 +420,7 @@ export class CameraCardEditor extends LitElement {
   }
 
   private _renderButtonEditor(
-    key: 'substream' | 'fullscreen',
+    key: 'substream' | 'recording' | 'fullscreen',
     title: string,
     helper: string,
     activeIconLabel: string,
@@ -645,7 +645,8 @@ export class CameraCardEditor extends LitElement {
         <div class="subsection">
           <h4>Control row</h4>
           <p class="helper">
-            Positions the HD/SD and fullscreen buttons together, like a preset row.
+            Positions the HD/SD, recording, and fullscreen buttons together, like a
+            preset row.
           </p>
           ${this._form(
             this._model.settings.controls as unknown as FormData,
@@ -664,6 +665,12 @@ export class CameraCardEditor extends LitElement {
           'HD stream button',
           'Switches between the configured main and HD camera entities.',
           'HD active / return icon',
+        )}
+        ${this._renderButtonEditor(
+          'recording',
+          'Recording button',
+          'Opens UniFi Protect recordings for the current camera and returns to live view when pressed again.',
+          'Recording active / return-to-live icon',
         )}
         ${this._renderButtonEditor(
           'fullscreen',

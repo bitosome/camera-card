@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CameraCard,
   callUniFiPreset,
+  createUniFiRecordingPath,
   isFocusedCardFullscreen,
+  recordingClipWindow,
   resolvePercentage,
+  toLocalDateTimeValue,
   toggleFocusedCardFullscreen,
   type FocusedFullscreenAPI,
 } from '../../src/focused/card';
@@ -66,6 +69,27 @@ describe('focused card', () => {
     expect(resolvePercentage('120', 90)).toBe(100);
   });
 
+  it('builds a bounded UniFi Protect recording request', () => {
+    const now = Date.parse('2026-09-08T12:00:00.000Z');
+    const requested = Date.parse('2026-09-08T11:50:00.000Z');
+    const { start, end } = recordingClipWindow(requested, now);
+
+    expect(start.toISOString()).toBe('2026-09-08T11:50:00.000Z');
+    expect(end.toISOString()).toBe('2026-09-08T12:00:00.000Z');
+    expect(createUniFiRecordingPath('entry-1', 'camera.driveway', start, end)).toBe(
+      '/api/unifiprotect/video/entry-1/camera.driveway/2026-09-08T11%3A50%3A00.000Z/2026-09-08T12%3A00%3A00.000Z',
+    );
+  });
+
+  it('keeps recording clips in the past and formats local input values', () => {
+    const now = Date.parse('2026-09-08T12:00:00.000Z');
+    const { start, end } = recordingClipWindow(now + 60_000, now);
+
+    expect(start.getTime()).toBe(now - 60_000);
+    expect(end.getTime()).toBe(now);
+    expect(toLocalDateTimeValue(start.getTime())).toMatch(/^2026-09-08T\d{2}:\d{2}$/);
+  });
+
   it('uses and exits the viewport fallback when native fullscreen is unavailable', async () => {
     const card = new CameraCard();
     card.hass = {
@@ -100,6 +124,56 @@ describe('focused card', () => {
       ?.click();
     await card.updateComplete;
     expect(card.hasAttribute('data-fullscreen-fallback')).toBe(false);
+    card.remove();
+  });
+
+  it('resolves and signs a recording URL through Home Assistant', async () => {
+    const callWS = vi.fn(async (message: Record<string, unknown>) => {
+      if (message.type === 'config/entity_registry/get') {
+        return { platform: 'unifiprotect', config_entry_id: 'entry-1' };
+      }
+      return { path: '/signed-recording?authSig=test' };
+    });
+    const card = new CameraCard();
+    card.hass = {
+      states: {
+        'camera.main': {
+          entity_id: 'camera.main',
+          state: 'streaming',
+          attributes: {},
+        },
+      },
+      callWS,
+      callService: vi.fn(),
+    } as unknown as HomeAssistant;
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+    });
+    document.body.append(card);
+    await card.updateComplete;
+
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="View recordings"]')
+      ?.click();
+
+    await vi.waitFor(() => {
+      expect(card.shadowRoot?.querySelector('video')?.getAttribute('src')).toBe(
+        '/signed-recording?authSig=test',
+      );
+    });
+    expect(callWS).toHaveBeenNthCalledWith(1, {
+      type: 'config/entity_registry/get',
+      entity_id: 'camera.main',
+    });
+    expect(callWS).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: 'auth/sign_path',
+        path: expect.stringContaining('/api/unifiprotect/video/entry-1/camera.main/'),
+        expires: 3600,
+      }),
+    );
     card.remove();
   });
 });

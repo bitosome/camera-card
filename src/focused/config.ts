@@ -21,6 +21,11 @@ const DEFAULT_SETTINGS: FocusedSettings = {
     icon: 'mdi:high-definition',
     active_icon: 'mdi:standard-definition',
   },
+  recording: {
+    enabled: true,
+    icon: 'mdi:history',
+    active_icon: 'mdi:video',
+  },
   fullscreen: {
     enabled: true,
     icon: 'mdi:fullscreen',
@@ -140,6 +145,7 @@ export const normalizeFocusedConfig = (config: RawFocusedConfig): FocusedModel =
         spacing: asPosition(asRecord(focused?.controls)?.spacing, 8),
       },
       substream: normalizeButton(focused?.substream, DEFAULT_SETTINGS.substream),
+      recording: normalizeButton(focused?.recording, DEFAULT_SETTINGS.recording),
       fullscreen: normalizeButton(focused?.fullscreen, DEFAULT_SETTINGS.fullscreen),
       preset_groups: Array.isArray(focused?.preset_groups)
         ? focused.preset_groups

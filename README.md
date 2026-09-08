@@ -1,11 +1,13 @@
 # Camera Card
 
-A small Home Assistant dashboard card for live camera streams and UniFi Protect
-PTZ presets.
+A small Home Assistant dashboard card for live camera streams, UniFi Protect
+recordings, and PTZ presets.
 
 ## Features
 
 - Main and HD Home Assistant camera streams.
+- Per-camera UniFi Protect recording playback with a 24-hour scrubber, exact
+  date/time selection, and 15-minute previous/next controls.
 - Reorderable camera navigation.
 - Fullscreen with a dedicated active/exit icon and a mobile fallback.
 - Customizable icons, button size, and percentage-based positions.
@@ -47,7 +49,7 @@ Drag camera rows or use the arrow buttons to change navigation order.
 
 ### Overlay controls
 
-The HD and fullscreen controls each provide:
+The HD, recording, and fullscreen controls each provide:
 
 - Show/hide toggle.
 - Normal icon.
@@ -62,6 +64,20 @@ The controls share one row layout:
 Position fields can be emptied while typing. Values are interpreted as percentages of
 the camera surface when the card renders. The fullscreen active icon exits fullscreen
 when clicked, including when the browser requires the mobile fallback.
+
+### Recordings
+
+The recording button is available on every configured camera. Opening it starts with
+the most recent five minutes and provides:
+
+- A scrubber covering the previous 24 hours.
+- An exact local date and time field for older footage.
+- Previous and next 15-minute clip buttons.
+- Native video controls and a **Live** button.
+
+Playback uses Home Assistant's authenticated UniFi Protect video endpoint; camera
+credentials never reach the card. The UniFi Protect integration must use **Full
+access** connection mode because API-key-only entries do not expose recorded media.
 
 ### Preset controls
 
@@ -112,6 +128,10 @@ focused:
     enabled: true
     icon: mdi:high-definition
     active_icon: mdi:standard-definition
+  recording:
+    enabled: true
+    icon: mdi:history
+    active_icon: mdi:video
   fullscreen:
     enabled: true
     icon: mdi:fullscreen

@@ -101,4 +101,14 @@ describe('focused configuration', () => {
 
     expect(model.settings.controls).toEqual({ x: '', y: '89', spacing: '1' });
   });
+
+  it('enables recording playback with customizable icons by default', () => {
+    const model = createDefaultModel('camera.main');
+
+    expect(model.settings.recording).toEqual({
+      enabled: true,
+      icon: 'mdi:history',
+      active_icon: 'mdi:video',
+    });
+  });
 });

@@ -6,6 +6,7 @@ export interface HomeAssistantState {
 
 export interface HomeAssistant {
   states: Record<string, HomeAssistantState>;
+  callWS<T>(message: Record<string, unknown>): Promise<T>;
   callService(
     domain: string,
     service: string,
@@ -52,6 +53,7 @@ export interface FocusedSettings {
   button_size: number;
   controls: FocusedControlGroup;
   substream: FocusedOverlayButton;
+  recording: FocusedOverlayButton;
   fullscreen: FocusedOverlayButton;
   preset_groups: FocusedPresetGroup[];
 }
@@ -78,6 +80,7 @@ export interface RawFocusedSettings {
   button_size?: number;
   controls?: Partial<FocusedControlGroup>;
   substream?: Partial<FocusedOverlayButton>;
+  recording?: Partial<FocusedOverlayButton>;
   fullscreen?: Partial<FocusedOverlayButton>;
   preset_groups?: FocusedPresetGroup[];
 }
