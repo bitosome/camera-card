@@ -6,11 +6,13 @@ import {
   formatHassDateTime,
   groupedButtonLeft,
   isFocusedCardFullscreen,
-  parseHassDateTimeValue,
+  mergeRecordingRanges,
+  parseHassDateValue,
   recordingClipWindow,
-  recordingSeekWindow,
+  recordingDayWindow,
+  recordingPlayableEnd,
   resolvePercentage,
-  toHassDateTimeValue,
+  toHassDateValue,
   toggleFocusedCardFullscreen,
   type FocusedFullscreenAPI,
 } from '../../src/focused/card';
@@ -113,8 +115,10 @@ describe('focused card', () => {
 
     expect(start.getTime()).toBe(now - 10_000);
     expect(end.getTime()).toBe(now);
-    expect(toHassDateTimeValue(timestamp, hass)).toBe('2026-09-08T15:34');
-    expect(parseHassDateTimeValue('2026-09-08T15:34', hass)).toBe(timestamp);
+    expect(toHassDateValue(timestamp, hass)).toBe('2026-09-08');
+    expect(parseHassDateValue('2026-09-08', hass)).toBe(
+      Date.parse('2026-09-07T21:00:00.000Z'),
+    );
     expect(formatHassDateTime(timestamp, hass)).toBe('08/09/2026, 15:34:00');
 
     const twelveHourHass = {
@@ -129,18 +133,37 @@ describe('focused card', () => {
     expect(formatHassDateTime(timestamp, twelveHourHass)).toBe('9/8/2026, 12:34:00 PM');
   });
 
-  it('centers a 30-minute seek window unless it would extend into live video', () => {
+  it('uses Home Assistant calendar days and caps an unfinished day at now', () => {
     const now = Date.parse('2026-09-08T12:00:00.000Z');
-    const oldPosition = Date.parse('2026-09-08T11:00:00.000Z');
+    const hass = {
+      locale: { time_zone: 'server' },
+      config: { time_zone: 'Europe/Tallinn' },
+    } as HomeAssistant;
 
-    expect(recordingSeekWindow(oldPosition, now)).toEqual({
-      start: Date.parse('2026-09-08T10:45:00.000Z'),
-      end: Date.parse('2026-09-08T11:15:00.000Z'),
+    const day = recordingDayWindow(now, hass);
+    expect(day).toEqual({
+      start: Date.parse('2026-09-07T21:00:00.000Z'),
+      end: Date.parse('2026-09-08T21:00:00.000Z'),
     });
-    expect(recordingSeekWindow(now - 5 * 60_000, now)).toEqual({
-      start: now - 30 * 60_000 - 10_000,
-      end: now - 10_000,
-    });
+    expect(recordingPlayableEnd(day.end, now)).toBe(now - 10_000);
+
+    const dstDay = recordingDayWindow(Date.parse('2026-10-25T12:00:00.000Z'), hass);
+    expect(dstDay.end - dstDay.start).toBe(25 * 60 * 60_000);
+    expect(recordingPlayableEnd(day.end, Date.parse('2026-09-10T12:00:00.000Z'))).toBe(
+      day.end - 1000,
+    );
+  });
+
+  it('merges adjacent unavailable recording ranges', () => {
+    expect(
+      mergeRecordingRanges(
+        [
+          { start: 0, end: 10 },
+          { start: 30, end: 40 },
+        ],
+        { start: 10, end: 30 },
+      ),
+    ).toEqual([{ start: 0, end: 40 }]);
   });
 
   it('uses and exits the viewport fallback when native fullscreen is unavailable', async () => {
@@ -233,6 +256,14 @@ describe('focused card', () => {
     const timeline = card.shadowRoot?.querySelector<HTMLInputElement>(
       '[aria-label="Recording playback time"]',
     );
+    expect(Number(timeline?.max) - Number(timeline?.min)).toBe(24 * 60 * 60);
+    expect(
+      parseFloat(
+        card.shadowRoot
+          ?.querySelector<HTMLElement>('.recording-range')
+          ?.style.getPropertyValue('--recording-playable') ?? '100',
+      ),
+    ).toBeLessThan(100);
     const selectedSecond = Number(timeline?.min) + 30;
     if (timeline) {
       timeline.value = String(selectedSecond);
@@ -258,13 +289,20 @@ describe('focused card', () => {
       card.shadowRoot?.querySelector('[aria-label="Play recording"]'),
     ).not.toBeNull();
 
-    const dateInput = card.shadowRoot?.querySelector('.recording-datetime');
+    const dateInput =
+      card.shadowRoot?.querySelector<HTMLInputElement>('.recording-datetime');
     expect(dateInput).not.toBeNull();
+    expect(dateInput?.type).toBe('date');
     expect(card.shadowRoot?.querySelector('.recording-pull-tab')).toBeNull();
     expect(dateInput?.closest('.recording-date-action')?.nextElementSibling).toBe(
       card.shadowRoot?.querySelector('.live-action'),
     );
     expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);
+    card.shadowRoot
+      ?.querySelector<HTMLVideoElement>('.recording-video')
+      ?.dispatchEvent(new Event('error'));
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector('.recording-gap')).not.toBeNull();
     expect(callWS).toHaveBeenNthCalledWith(1, {
       type: 'config/entity_registry/get',
       entity_id: 'camera.main',

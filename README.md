@@ -7,7 +7,7 @@ recordings, and PTZ presets.
 
 - Main and HD Home Assistant camera streams.
 - Per-camera UniFi Protect recording playback with a mobile-friendly custom player,
-  exact date/time selection, and continuous short-clip playback.
+  full-day seeking, and continuous short-clip playback.
 - Reorderable camera navigation.
 - Fullscreen with a dedicated active/exit icon and a mobile fallback.
 - Customizable icons, button size, and percentage-based positions.
@@ -73,12 +73,16 @@ when clicked, including when the browser requires the mobile fallback.
 The recording button is available on every configured camera. Opening it starts with
 the most recent five minutes and provides:
 
-- One compact 30-minute absolute timeline that tracks the real recording time and can
-  be dragged to any second in its window.
+- One full-day timeline for the selected calendar date, from midnight to midnight in
+  Home Assistant's timezone.
 - Play/pause, mute, and previous/next 10-second controls.
-- A calendar control immediately before **Live** for selecting older footage.
+- A calendar control immediately before **Live** for selecting a date. Selecting a
+  date starts playback at the beginning of that day.
 - Automatic playback of the following clip, avoiding the long wait and very large
   download produced by a single lengthy UniFi export.
+- On the current day, the future portion of the timeline is gray and cannot be
+  selected. Unavailable recording ranges reported while browsing older footage are
+  marked with a striped gray segment.
 - A **Live** button that returns to the camera stream.
 
 The card deliberately replaces browser-native video controls so mobile browsers do

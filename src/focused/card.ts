@@ -67,8 +67,12 @@ interface PositionedOverlayButton extends FocusedOverlayButton {
   left?: string;
 }
 
+export interface RecordingRange {
+  start: number;
+  end: number;
+}
+
 const RECORDING_CLIP_SECONDS = 10;
-const RECORDING_SEEK_WINDOW_MINUTES = 30;
 
 export const recordingClipWindow = (
   requestedStart: number,
@@ -182,18 +186,20 @@ const dateTimeParts = (
       .map((part) => [part.type, Number(part.value)]),
   );
 
-export const toHassDateTimeValue = (timestamp: number, hass: HomeAssistant): string => {
+export const toHassDateValue = (timestamp: number, hass: HomeAssistant): string => {
   const parts = dateTimeParts(timestamp, hassTimeZone(hass));
   const value = (part: string) => String(parts[part]).padStart(2, '0');
-  return `${parts.year}-${value('month')}-${value('day')}T${value('hour')}:${value('minute')}`;
+  return `${parts.year}-${value('month')}-${value('day')}`;
 };
 
-export const parseHassDateTimeValue = (value: string, hass: HomeAssistant): number => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
-  if (!match) {
-    return Number.NaN;
-  }
-  const [, year, month, day, hour, minute] = match.map(Number);
+const hassTimestamp = (
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  hass: HomeAssistant,
+): number => {
   const expected = Date.UTC(year, month - 1, day, hour, minute);
   const timeZone = hassTimeZone(hass);
   let timestamp = expected;
@@ -218,14 +224,51 @@ export const parseHassDateTimeValue = (value: string, hass: HomeAssistant): numb
     : Number.NaN;
 };
 
-export const recordingSeekWindow = (
-  position: number,
-  now = Date.now(),
-): { start: number; end: number } => {
-  const halfWindow = (RECORDING_SEEK_WINDOW_MINUTES * 60_000) / 2;
-  const latest = now - RECORDING_CLIP_SECONDS * 1000;
-  const end = Math.min(position + halfWindow, latest);
-  return { start: end - halfWindow * 2, end };
+export const parseHassDateValue = (value: string, hass: HomeAssistant): number => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, year, month, day] = match.map(Number);
+  return hassTimestamp(year, month, day, 0, 0, hass);
+};
+
+export const recordingDayWindow = (
+  timestamp: number,
+  hass: HomeAssistant,
+): RecordingRange => {
+  const parts = dateTimeParts(timestamp, hassTimeZone(hass));
+  const start = hassTimestamp(parts.year, parts.month, parts.day, 0, 0, hass);
+  const nextDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
+  const end = hassTimestamp(
+    nextDate.getUTCFullYear(),
+    nextDate.getUTCMonth() + 1,
+    nextDate.getUTCDate(),
+    0,
+    0,
+    hass,
+  );
+  return { start, end };
+};
+
+export const recordingPlayableEnd = (dayEnd: number, now = Date.now()): number => {
+  return Math.min(dayEnd - 1000, now - RECORDING_CLIP_SECONDS * 1000);
+};
+
+export const mergeRecordingRanges = (
+  ranges: RecordingRange[],
+  added: RecordingRange,
+): RecordingRange[] => {
+  const merged: RecordingRange[] = [];
+  for (const range of [...ranges, added].sort((a, b) => a.start - b.start)) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
 };
 
 export const groupedButtonLeft = (
@@ -322,10 +365,13 @@ export class CameraCard extends LitElement {
   private _recordingPosition = this._recordingStart;
 
   @state()
-  private _recordingSeekStart = Date.now() - RECORDING_SEEK_WINDOW_MINUTES * 60_000;
+  private _recordingDayStart = 0;
 
   @state()
-  private _recordingSeekEnd = Date.now() - RECORDING_CLIP_SECONDS * 1000;
+  private _recordingDayEnd = 0;
+
+  @state()
+  private _unavailableRecordings: Record<string, RecordingRange[]> = {};
 
   private _loadingElements?: Promise<void>;
   private _documentOverflow = '';
@@ -472,9 +518,9 @@ export class CameraCard extends LitElement {
     this._recordingStart = Date.now() - 5 * 60_000;
     this._recordingPosition = this._recordingStart;
     if (this.hass) {
-      this._recordingDateDraft = toHassDateTimeValue(this._recordingStart, this.hass);
+      this._recordingDateDraft = toHassDateValue(this._recordingStart, this.hass);
     }
-    this._setRecordingSeekWindow(this._recordingStart);
+    this._setRecordingDay(this._recordingStart);
     void this._loadRecording(pair.main);
   }
 
@@ -511,7 +557,7 @@ export class CameraCard extends LitElement {
       this._recordingStart = start.getTime();
       this._recordingPosition = this._recordingStart;
       if (!this._recordingDateEditing) {
-        this._recordingDateDraft = toHassDateTimeValue(this._recordingStart, this.hass);
+        this._recordingDateDraft = toHassDateValue(this._recordingStart, this.hass);
       }
       const unsignedPath = createUniFiRecordingPath(
         configEntryID,
@@ -539,23 +585,27 @@ export class CameraCard extends LitElement {
   private _selectRecordingTime(
     timestamp: number,
     cameraEntity: string,
-    resetSeekWindow = false,
+    resetDay = false,
   ): void {
     if (!Number.isFinite(timestamp)) {
       return;
     }
-    this._recordingStart = Math.min(
-      timestamp,
-      Date.now() - RECORDING_CLIP_SECONDS * 1000,
+    if (
+      resetDay ||
+      timestamp < this._recordingDayStart ||
+      timestamp >= this._recordingDayEnd
+    ) {
+      this._setRecordingDay(timestamp);
+    }
+    const playableEnd = Math.max(
+      this._recordingDayStart,
+      recordingPlayableEnd(this._recordingDayEnd),
+    );
+    this._recordingStart = Math.max(
+      this._recordingDayStart,
+      Math.min(timestamp, playableEnd),
     );
     this._recordingPosition = this._recordingStart;
-    if (
-      resetSeekWindow ||
-      this._recordingStart < this._recordingSeekStart ||
-      this._recordingStart > this._recordingSeekEnd
-    ) {
-      this._setRecordingSeekWindow(this._recordingStart);
-    }
     void this._loadRecording(cameraEntity);
   }
 
@@ -608,10 +658,30 @@ export class CameraCard extends LitElement {
     }
   }
 
-  private _setRecordingSeekWindow(position: number): void {
-    const window = recordingSeekWindow(position);
-    this._recordingSeekStart = window.start;
-    this._recordingSeekEnd = window.end;
+  private _setRecordingDay(position: number): void {
+    if (!this.hass) {
+      return;
+    }
+    const day = recordingDayWindow(position, this.hass);
+    this._recordingDayStart = day.start;
+    this._recordingDayEnd = day.end;
+  }
+
+  private _markRecordingUnavailable(cameraEntity: string): void {
+    const unavailable = mergeRecordingRanges(
+      this._unavailableRecordings[cameraEntity] ?? [],
+      {
+        start: this._recordingStart,
+        end: Math.min(
+          this._recordingStart + RECORDING_CLIP_SECONDS * 1000,
+          this._recordingDayEnd,
+        ),
+      },
+    );
+    this._unavailableRecordings = {
+      ...this._unavailableRecordings,
+      [cameraEntity]: unavailable,
+    };
   }
 
   private _recordingTimeUpdate(event: Event): void {
@@ -791,35 +861,78 @@ export class CameraCard extends LitElement {
     if (!this.hass) {
       return html``;
     }
-    const position = Math.min(
-      this._recordingSeekEnd,
-      Math.max(this._recordingSeekStart, this._recordingPosition),
+    const playableEnd = Math.max(
+      this._recordingDayStart,
+      recordingPlayableEnd(this._recordingDayEnd),
     );
+    const position = Math.min(
+      playableEnd,
+      Math.max(this._recordingDayStart, this._recordingPosition),
+    );
+    const duration = Math.max(1, this._recordingDayEnd - this._recordingDayStart);
+    const percentage = (timestamp: number) =>
+      `${Math.max(0, Math.min(100, ((timestamp - this._recordingDayStart) / duration) * 100))}%`;
+    const rangeWidth = (start: number, end: number) =>
+      `${Math.max(0, Math.min(100, ((end - start) / duration) * 100))}%`;
+    const gaps = (this._unavailableRecordings[pair.main] ?? [])
+      .filter(
+        (range) =>
+          range.end > this._recordingDayStart && range.start < this._recordingDayEnd,
+      )
+      .map((range) => ({
+        start: Math.max(range.start, this._recordingDayStart),
+        end: Math.min(range.end, this._recordingDayEnd),
+      }))
+      .map((range) => ({
+        left: percentage(range.start),
+        width: rangeWidth(range.start, range.end),
+      }));
     const date = formatHassDate(position, this.hass);
     const time = formatHassTime(position, this.hass);
 
     return html`<div class="recording-player">
       <div class="recording-timeline">
-        <input
-          type="range"
-          min=${String(Math.floor(this._recordingSeekStart / 1000))}
-          max=${String(Math.floor(this._recordingSeekEnd / 1000))}
-          step="1"
-          .value=${String(Math.floor(position / 1000))}
-          aria-label="Recording playback time"
-          @input=${(event: Event) => {
-            this._recordingSeeking = true;
-            this._recordingPosition =
-              Number((event.currentTarget as HTMLInputElement).value) * 1000;
-          }}
-          @change=${(event: Event) => {
-            this._recordingSeeking = false;
-            this._selectRecordingTime(
-              Number((event.currentTarget as HTMLInputElement).value) * 1000,
-              pair.main,
-            );
-          }}
-        />
+        <div
+          class="recording-range"
+          style=${styleMap({
+            '--recording-position': percentage(position),
+            '--recording-playable': percentage(playableEnd),
+          })}
+        >
+          <div class="recording-track" aria-hidden="true">
+            ${gaps.map(
+              (gap) =>
+                html`<span
+                  class="recording-gap"
+                  title="Unavailable recording"
+                  style=${styleMap({ left: gap.left, width: gap.width })}
+                ></span>`,
+            )}
+          </div>
+          <input
+            type="range"
+            min=${String(Math.floor(this._recordingDayStart / 1000))}
+            max=${String(Math.floor(this._recordingDayEnd / 1000))}
+            step="1"
+            .value=${String(Math.floor(position / 1000))}
+            aria-label="Recording playback time"
+            @input=${(event: Event) => {
+              this._recordingSeeking = true;
+              const input = event.currentTarget as HTMLInputElement;
+              const timestamp = Math.min(Number(input.value) * 1000, playableEnd);
+              input.value = String(Math.floor(timestamp / 1000));
+              this._recordingPosition = timestamp;
+            }}
+            @change=${(event: Event) => {
+              this._recordingSeeking = false;
+              const timestamp = Math.min(
+                Number((event.currentTarget as HTMLInputElement).value) * 1000,
+                playableEnd,
+              );
+              this._selectRecordingTime(timestamp, pair.main);
+            }}
+          />
+        </div>
         <time datetime=${new Date(position).toISOString()}>
           <span class="recording-date">${date}</span>
           <span>${time}</span>
@@ -860,21 +973,15 @@ export class CameraCard extends LitElement {
             icon=${this._recordingMuted ? 'mdi:volume-off' : 'mdi:volume-high'}
           ></ha-icon>
         </button>
-        <label
-          class="player-action recording-date-action"
-          title="Choose recording date and time"
-        >
+        <label class="player-action recording-date-action" title="Choose recording date">
           <ha-icon icon="mdi:calendar-clock"></ha-icon>
           <input
             class="recording-datetime"
-            type="datetime-local"
+            type="date"
             lang=${hassLanguage(this.hass) ?? ''}
-            aria-label="Choose recording date and time"
+            aria-label="Choose recording date"
             .value=${this._recordingDateDraft}
-            max=${toHassDateTimeValue(
-              Date.now() - RECORDING_CLIP_SECONDS * 1000,
-              this.hass,
-            )}
+            max=${toHassDateValue(Date.now(), this.hass)}
             @click=${() => {
               this._recordingDateEditing = true;
             }}
@@ -888,7 +995,7 @@ export class CameraCard extends LitElement {
               const value = (event.currentTarget as HTMLInputElement).value;
               this._recordingDateDraft = value;
               this._recordingDateEditing = false;
-              const timestamp = parseHassDateTimeValue(value, this.hass!);
+              const timestamp = parseHassDateValue(value, this.hass!);
               if (Number.isFinite(timestamp)) {
                 this._selectRecordingTime(timestamp, pair.main, true);
               }
@@ -947,6 +1054,7 @@ export class CameraCard extends LitElement {
                 @ended=${() => this._advanceRecording(pair.main)}
                 @error=${() => {
                   this._recordingLoading = false;
+                  this._markRecordingUnavailable(pair.main);
                   this._error =
                     'Recording could not be played. UniFi Protect media requires Full access mode and available footage.';
                 }}
@@ -1179,10 +1287,87 @@ export class CameraCard extends LitElement {
       gap: 6px;
     }
 
-    .recording-timeline input {
+    .recording-range {
+      position: relative;
+      display: flex;
       min-width: 60px;
+      height: 24px;
       flex: 1;
-      accent-color: var(--primary-color, #03a9f4);
+      align-items: center;
+    }
+
+    .recording-track {
+      position: absolute;
+      right: 0;
+      left: 0;
+      height: 5px;
+      overflow: hidden;
+      border-radius: 3px;
+      background: linear-gradient(
+        to right,
+        var(--primary-color, #03a9f4) 0 var(--recording-position),
+        rgba(255, 255, 255, 0.38) var(--recording-position) var(--recording-playable),
+        rgba(110, 110, 110, 0.55) var(--recording-playable) 100%
+      );
+    }
+
+    .recording-gap {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      min-width: 2px;
+      background: repeating-linear-gradient(
+        135deg,
+        rgba(65, 65, 65, 0.95) 0 3px,
+        rgba(115, 115, 115, 0.95) 3px 6px
+      );
+    }
+
+    .recording-range input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 24px;
+      margin: 0;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .recording-range input::-webkit-slider-runnable-track {
+      height: 5px;
+      background: transparent;
+    }
+
+    .recording-range input::-webkit-slider-thumb {
+      width: 16px;
+      height: 16px;
+      margin-top: -5.5px;
+      appearance: none;
+      border: 0;
+      border-radius: 50%;
+      background: var(--primary-color, #03a9f4);
+    }
+
+    .recording-range input::-moz-range-track {
+      height: 5px;
+      background: transparent;
+    }
+
+    .recording-range input::-moz-range-progress {
+      background: transparent;
+    }
+
+    .recording-range input::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--primary-color, #03a9f4);
+    }
+
+    .recording-range:focus-within .recording-track {
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
     }
 
     .recording-timeline time {
