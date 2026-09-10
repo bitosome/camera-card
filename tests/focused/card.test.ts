@@ -6,6 +6,7 @@ import {
   groupedButtonLeft,
   isFocusedCardFullscreen,
   recordingClipWindow,
+  recordingSeekWindow,
   resolvePercentage,
   toLocalDateTimeValue,
   toggleFocusedCardFullscreen,
@@ -103,6 +104,20 @@ describe('focused card', () => {
     expect(toLocalDateTimeValue(start.getTime())).toMatch(/^2026-09-08T\d{2}:\d{2}$/);
   });
 
+  it('centers a 30-minute seek window unless it would extend into live video', () => {
+    const now = Date.parse('2026-09-08T12:00:00.000Z');
+    const oldPosition = Date.parse('2026-09-08T11:00:00.000Z');
+
+    expect(recordingSeekWindow(oldPosition, now)).toEqual({
+      start: Date.parse('2026-09-08T10:45:00.000Z'),
+      end: Date.parse('2026-09-08T11:15:00.000Z'),
+    });
+    expect(recordingSeekWindow(now - 5 * 60_000, now)).toEqual({
+      start: now - 30 * 60_000 - 10_000,
+      end: now - 10_000,
+    });
+  });
+
   it('uses and exits the viewport fallback when native fullscreen is unavailable', async () => {
     const card = new CameraCard();
     card.hass = {
@@ -175,6 +190,9 @@ describe('focused card', () => {
         '/signed-recording?authSig=test',
       );
     });
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Recording playback time"]'),
+    ).not.toBeNull();
     expect(card.shadowRoot?.querySelector('.recording-datetime')).toBeNull();
     card.shadowRoot
       ?.querySelector<HTMLButtonElement>('[aria-label="Show recording timeline"]')

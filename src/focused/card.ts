@@ -69,6 +69,7 @@ interface PositionedOverlayButton extends FocusedOverlayButton {
 
 const RECORDING_CLIP_SECONDS = 10;
 const RECORDING_SCRUB_MINUTES = 24 * 60;
+const RECORDING_SEEK_WINDOW_MINUTES = 30;
 
 export const recordingClipWindow = (
   requestedStart: number,
@@ -94,6 +95,16 @@ export const toLocalDateTimeValue = (timestamp: number): string => {
   const date = new Date(timestamp);
   const part = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+};
+
+export const recordingSeekWindow = (
+  position: number,
+  now = Date.now(),
+): { start: number; end: number } => {
+  const halfWindow = (RECORDING_SEEK_WINDOW_MINUTES * 60_000) / 2;
+  const latest = now - RECORDING_CLIP_SECONDS * 1000;
+  const end = Math.min(position + halfWindow, latest);
+  return { start: end - halfWindow * 2, end };
 };
 
 export const groupedButtonLeft = (
@@ -180,9 +191,19 @@ export class CameraCard extends LitElement {
   @state()
   private _recordingPanelOpen = false;
 
+  @state()
+  private _recordingPosition = this._recordingStart;
+
+  @state()
+  private _recordingSeekStart = Date.now() - RECORDING_SEEK_WINDOW_MINUTES * 60_000;
+
+  @state()
+  private _recordingSeekEnd = Date.now() - RECORDING_CLIP_SECONDS * 1000;
+
   private _loadingElements?: Promise<void>;
   private _documentOverflow = '';
   private _recordingRequest = 0;
+  private _recordingSeeking = false;
   private _configEntryIDs = new Map<string, string>();
   private _drawerPointerStart?: number;
   private _drawerDragged = false;
@@ -306,6 +327,8 @@ export class CameraCard extends LitElement {
     this._recordingUrl = '';
     this._recordingLoading = false;
     this._recordingPanelOpen = false;
+    this._recordingSeeking = false;
+    this._recordingPosition = this._recordingStart;
     this._error = '';
   }
 
@@ -317,6 +340,8 @@ export class CameraCard extends LitElement {
     this._recordingMode = true;
     this._recordingPanelOpen = false;
     this._recordingStart = Date.now() - 5 * 60_000;
+    this._recordingPosition = this._recordingStart;
+    this._setRecordingSeekWindow(this._recordingStart);
     void this._loadRecording(pair.main);
   }
 
@@ -350,6 +375,8 @@ export class CameraCard extends LitElement {
     try {
       const configEntryID = await this._configEntryID(cameraEntity);
       const { start, end } = recordingClipWindow(this._recordingStart);
+      this._recordingStart = start.getTime();
+      this._recordingPosition = this._recordingStart;
       const unsignedPath = createUniFiRecordingPath(
         configEntryID,
         cameraEntity,
@@ -373,7 +400,11 @@ export class CameraCard extends LitElement {
     }
   }
 
-  private _selectRecordingTime(timestamp: number, cameraEntity: string): void {
+  private _selectRecordingTime(
+    timestamp: number,
+    cameraEntity: string,
+    resetSeekWindow = false,
+  ): void {
     if (!Number.isFinite(timestamp)) {
       return;
     }
@@ -381,11 +412,36 @@ export class CameraCard extends LitElement {
       timestamp,
       Date.now() - RECORDING_CLIP_SECONDS * 1000,
     );
+    this._recordingPosition = this._recordingStart;
+    if (
+      resetSeekWindow ||
+      this._recordingStart < this._recordingSeekStart ||
+      this._recordingStart > this._recordingSeekEnd
+    ) {
+      this._setRecordingSeekWindow(this._recordingStart);
+    }
     void this._loadRecording(cameraEntity);
   }
 
   private _shiftRecording(seconds: number, cameraEntity: string): void {
     this._selectRecordingTime(this._recordingStart + seconds * 1000, cameraEntity);
+  }
+
+  private _setRecordingSeekWindow(position: number): void {
+    const window = recordingSeekWindow(position);
+    this._recordingSeekStart = window.start;
+    this._recordingSeekEnd = window.end;
+  }
+
+  private _recordingTimeUpdate(event: Event): void {
+    if (this._recordingSeeking) {
+      return;
+    }
+    const video = event.currentTarget as HTMLVideoElement;
+    const position = this._recordingStart + video.currentTime * 1000;
+    if (Math.abs(position - this._recordingPosition) >= 500) {
+      this._recordingPosition = position;
+    }
   }
 
   private _drawerPointerDown(event: PointerEvent): void {
@@ -585,7 +641,7 @@ export class CameraCard extends LitElement {
     const now = Date.now();
     const minutesFromNow = Math.max(
       -RECORDING_SCRUB_MINUTES,
-      Math.min(-1, Math.round((this._recordingStart - now) / 60_000)),
+      Math.min(-1, Math.round((this._recordingPosition - now) / 60_000)),
     );
     const label = new Intl.DateTimeFormat(undefined, {
       dateStyle: 'medium',
@@ -632,7 +688,7 @@ export class CameraCard extends LitElement {
                 max=${toLocalDateTimeValue(now - RECORDING_CLIP_SECONDS * 1000)}
                 @change=${(event: Event) => {
                   const value = (event.currentTarget as HTMLInputElement).value;
-                  this._selectRecordingTime(new Date(value).getTime(), pair.main);
+                  this._selectRecordingTime(new Date(value).getTime(), pair.main, true);
                 }}
               />
               <button
@@ -657,16 +713,62 @@ export class CameraCard extends LitElement {
                 .value=${String(minutesFromNow)}
                 aria-label="Recording time within the last 24 hours"
                 @input=${(event: Event) => {
+                  this._recordingSeeking = true;
                   const minutes = Number(
                     (event.currentTarget as HTMLInputElement).value,
                   );
-                  this._recordingStart = Date.now() + minutes * 60_000;
+                  this._recordingPosition = Date.now() + minutes * 60_000;
                 }}
-                @change=${() => void this._loadRecording(pair.main)}
+                @change=${(event: Event) => {
+                  this._recordingSeeking = false;
+                  const minutes = Number(
+                    (event.currentTarget as HTMLInputElement).value,
+                  );
+                  this._selectRecordingTime(
+                    Date.now() + minutes * 60_000,
+                    pair.main,
+                    true,
+                  );
+                }}
               />
               <span>${label}</span>
             </div>`
         : nothing}
+    </div>`;
+  }
+
+  private _renderRecordingSeek(pair: FocusedCameraPair): TemplateResult {
+    const position = Math.min(
+      this._recordingSeekEnd,
+      Math.max(this._recordingSeekStart, this._recordingPosition),
+    );
+    const label = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+    }).format(position);
+
+    return html`<div class="recording-seek">
+      <input
+        type="range"
+        min=${String(Math.floor(this._recordingSeekStart / 1000))}
+        max=${String(Math.floor(this._recordingSeekEnd / 1000))}
+        step="1"
+        .value=${String(Math.floor(position / 1000))}
+        aria-label="Recording playback time"
+        @input=${(event: Event) => {
+          this._recordingSeeking = true;
+          this._recordingPosition =
+            Number((event.currentTarget as HTMLInputElement).value) * 1000;
+        }}
+        @change=${(event: Event) => {
+          this._recordingSeeking = false;
+          this._selectRecordingTime(
+            Number((event.currentTarget as HTMLInputElement).value) * 1000,
+            pair.main,
+          );
+        }}
+      />
+      <span>${label}</span>
     </div>`;
   }
 
@@ -695,6 +797,7 @@ export class CameraCard extends LitElement {
                 muted
                 playsinline
                 @canplay=${() => (this._recordingLoading = false)}
+                @timeupdate=${this._recordingTimeUpdate}
                 @ended=${() => this._shiftRecording(RECORDING_CLIP_SECONDS, pair.main)}
                 @error=${() => {
                   this._recordingLoading = false;
@@ -739,6 +842,7 @@ export class CameraCard extends LitElement {
             `
           : nothing}
         ${this._renderControls(pair, model)}
+        ${this._recordingMode ? this._renderRecordingSeek(pair) : nothing}
         ${this._recordingMode ? this._renderRecordingControls(pair) : nothing}
         ${!this._recordingMode && presetGroup?.device_id
           ? this._renderPresets(presetGroup, model.settings.button_size)
@@ -907,11 +1011,11 @@ export class CameraCard extends LitElement {
 
     .recording-pull-tab {
       position: absolute;
-      top: 50%;
+      top: calc(50% - 72px);
       left: -44px;
       display: grid;
       width: 44px;
-      height: 64px;
+      height: 48px;
       place-items: center;
       padding: 0;
       transform: translateY(-50%);
@@ -985,6 +1089,36 @@ export class CameraCard extends LitElement {
       font-size: 12px;
     }
 
+    .recording-seek {
+      position: absolute;
+      right: 48px;
+      bottom: 44px;
+      left: 48px;
+      z-index: 3;
+      display: flex;
+      min-width: 0;
+      height: 34px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      box-sizing: border-box;
+    }
+
+    .recording-seek input {
+      min-width: 60px;
+      flex: 1;
+      accent-color: var(--primary-color, #03a9f4);
+    }
+
+    .recording-seek span {
+      min-width: max-content;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
     @media (max-width: 600px) {
       .recording-drawer {
         width: calc(100% - 48px);
@@ -1008,6 +1142,19 @@ export class CameraCard extends LitElement {
 
       .recording-scrubber-row span {
         display: none;
+      }
+
+      .recording-seek {
+        right: 38px;
+        bottom: 40px;
+        left: 38px;
+        height: 30px;
+        gap: 5px;
+        padding: 0 7px;
+      }
+
+      .recording-seek span {
+        font-size: 10px;
       }
     }
   `;

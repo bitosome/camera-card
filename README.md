@@ -80,6 +80,10 @@ the most recent five minutes and provides:
   single lengthy UniFi export.
 - Native video controls and a **Live** button.
 
+A compact 30-minute absolute timeline remains above the native video controls. It
+tracks the real recording time while clips play and can be dragged to any second in
+that window. Seeking loads only the required short clip instead of a large export.
+
 The selector stays collapsed while footage plays. Pull or tap the tab on the right
 edge of the video to open it, then pull right or tap again to collapse it.
 
