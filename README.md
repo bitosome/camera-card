@@ -6,8 +6,8 @@ recordings, and PTZ presets.
 ## Features
 
 - Main and HD Home Assistant camera streams.
-- Per-camera UniFi Protect recording playback with a 24-hour scrubber, exact
-  date/time selection, and continuous short-clip playback.
+- Per-camera UniFi Protect recording playback with a mobile-friendly custom player,
+  exact date/time selection, and continuous short-clip playback.
 - Reorderable camera navigation.
 - Fullscreen with a dedicated active/exit icon and a mobile fallback.
 - Customizable icons, button size, and percentage-based positions.
@@ -73,19 +73,20 @@ when clicked, including when the browser requires the mobile fallback.
 The recording button is available on every configured camera. Opening it starts with
 the most recent five minutes and provides:
 
-- A scrubber covering the previous 24 hours.
-- An exact local date and time field for older footage.
-- Previous and next 10-second buttons. Playback automatically continues with the
-  following clip, avoiding the long wait and very large download produced by a
-  single lengthy UniFi export.
-- Native video controls and a **Live** button.
+- One compact 30-minute absolute timeline that tracks the real recording time and can
+  be dragged to any second in its window.
+- Play/pause, mute, and previous/next 10-second controls.
+- An exact local date and time field for older footage in the collapsible side drawer.
+- Automatic playback of the following clip, avoiding the long wait and very large
+  download produced by a single lengthy UniFi export.
+- A **Live** button that returns to the camera stream.
 
-A compact 30-minute absolute timeline remains above the native video controls. It
-tracks the real recording time while clips play and can be dragged to any second in
-that window. Seeking loads only the required short clip instead of a large export.
+The card deliberately replaces browser-native video controls so mobile browsers do
+not add a second, clip-relative scrubber. Seeking loads only the required short clip
+instead of a large export.
 
-The selector stays collapsed while footage plays. Pull or tap the tab on the right
-edge of the video to open it, then pull right or tap again to collapse it.
+The date/time selector stays collapsed while footage plays. Its tab remains fixed to
+the right edge of the video; pull or tap it to open or close the compact selector.
 
 Playback uses Home Assistant's authenticated UniFi Protect video endpoint; camera
 credentials never reach the card. The UniFi Protect integration must use **Full

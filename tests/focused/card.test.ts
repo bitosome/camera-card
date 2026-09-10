@@ -156,6 +156,9 @@ describe('focused card', () => {
   });
 
   it('resolves and signs a recording URL through Home Assistant', async () => {
+    const pause = vi
+      .spyOn(HTMLMediaElement.prototype, 'pause')
+      .mockImplementation(() => undefined);
     const callWS = vi.fn(async (message: Record<string, unknown>) => {
       if (message.type === 'config/entity_registry/get') {
         return { platform: 'unifiprotect', config_entry_id: 'entry-1' };
@@ -185,20 +188,58 @@ describe('focused card', () => {
       ?.querySelector<HTMLButtonElement>('[aria-label="View recordings"]')
       ?.click();
 
-    await vi.waitFor(() => {
+    await vi.waitFor(() =>
       expect(card.shadowRoot?.querySelector('video')?.getAttribute('src')).toBe(
         '/signed-recording?authSig=test',
-      );
-    });
+      ),
+    );
+    expect(card.shadowRoot?.querySelector('video')?.controls).toBe(false);
+    expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);
     expect(
       card.shadowRoot?.querySelector('[aria-label="Recording playback time"]'),
     ).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Pause recording"]'),
+    ).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Unmute recording"]'),
+    ).not.toBeNull();
+
+    const timeline = card.shadowRoot?.querySelector<HTMLInputElement>(
+      '[aria-label="Recording playback time"]',
+    );
+    const selectedSecond = Number(timeline?.min) + 30;
+    if (timeline) {
+      timeline.value = String(selectedSecond);
+      timeline.dispatchEvent(new Event('change'));
+    }
+    await vi.waitFor(() => expect(callWS).toHaveBeenCalledTimes(3));
+    await card.updateComplete;
+    expect(callWS).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        path: expect.stringContaining(
+          encodeURIComponent(new Date(selectedSecond * 1000).toISOString()),
+        ),
+      }),
+    );
+
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Pause recording"]')
+      ?.click();
+    await card.updateComplete;
+    expect(pause).toHaveBeenCalledOnce();
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Play recording"]'),
+    ).not.toBeNull();
+
     expect(card.shadowRoot?.querySelector('.recording-datetime')).toBeNull();
     card.shadowRoot
-      ?.querySelector<HTMLButtonElement>('[aria-label="Show recording timeline"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Show recording time selector"]')
       ?.click();
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('.recording-datetime')).not.toBeNull();
+    expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);
     expect(callWS).toHaveBeenNthCalledWith(1, {
       type: 'config/entity_registry/get',
       entity_id: 'camera.main',
@@ -212,5 +253,6 @@ describe('focused card', () => {
       }),
     );
     card.remove();
+    pause.mockRestore();
   });
 });
