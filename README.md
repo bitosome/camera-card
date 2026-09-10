@@ -61,6 +61,9 @@ The controls share one row layout:
 - Vertical position (`0`–`100`).
 - Spacing between buttons (`0`–`100`).
 
+The complete row is constrained as a group, preserving equal configured spacing while
+keeping every icon inside the camera surface.
+
 Position fields can be emptied while typing. Values are interpreted as percentages of
 the camera surface when the card renders. The fullscreen active icon exits fullscreen
 when clicked, including when the browser requires the mobile fallback.
@@ -76,6 +79,9 @@ the most recent five minutes and provides:
   following clip, avoiding the long wait and very large download produced by a
   single lengthy UniFi export.
 - Native video controls and a **Live** button.
+
+The selector stays collapsed while footage plays. Pull or tap the tab on the right
+edge of the video to open it, then pull right or tap again to collapse it.
 
 Playback uses Home Assistant's authenticated UniFi Protect video endpoint; camera
 credentials never reach the card. The UniFi Protect integration must use **Full

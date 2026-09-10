@@ -645,8 +645,9 @@ export class CameraCardEditor extends LitElement {
         <div class="subsection">
           <h4>Control row</h4>
           <p class="helper">
-            Positions the HD/SD, recording, and fullscreen buttons together, like a
-            preset row.
+            Controls the center, vertical position, and spacing of the HD/SD, recording,
+            and fullscreen icons as one row. The complete row stays inside the camera
+            edge.
           </p>
           ${this._form(
             this._model.settings.controls as unknown as FormData,

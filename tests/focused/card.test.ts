@@ -3,6 +3,7 @@ import {
   CameraCard,
   callUniFiPreset,
   createUniFiRecordingPath,
+  groupedButtonLeft,
   isFocusedCardFullscreen,
   recordingClipWindow,
   resolvePercentage,
@@ -67,6 +68,18 @@ describe('focused card', () => {
     expect(resolvePercentage('', 90)).toBe(90);
     expect(resolvePercentage('35', 90)).toBe(35);
     expect(resolvePercentage('120', 90)).toBe(100);
+  });
+
+  it('moves an entire button row inside the camera without changing its spacing', () => {
+    expect(groupedButtonLeft(90, 10, 3, 0, 34)).toBe(
+      'calc(clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%)) - 10%)',
+    );
+    expect(groupedButtonLeft(90, 10, 3, 1, 34)).toBe(
+      'clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%))',
+    );
+    expect(groupedButtonLeft(90, 10, 3, 2, 34)).toBe(
+      'calc(clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%)) + 10%)',
+    );
   });
 
   it('builds a bounded UniFi Protect recording request', () => {
@@ -162,6 +175,12 @@ describe('focused card', () => {
         '/signed-recording?authSig=test',
       );
     });
+    expect(card.shadowRoot?.querySelector('.recording-datetime')).toBeNull();
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Show recording timeline"]')
+      ?.click();
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector('.recording-datetime')).not.toBeNull();
     expect(callWS).toHaveBeenNthCalledWith(1, {
       type: 'config/entity_registry/get',
       entity_id: 'camera.main',

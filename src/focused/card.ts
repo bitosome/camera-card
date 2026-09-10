@@ -64,6 +64,7 @@ export const toggleFocusedCardFullscreen = async (
 interface PositionedOverlayButton extends FocusedOverlayButton {
   x: number;
   y: number;
+  left?: string;
 }
 
 const RECORDING_CLIP_SECONDS = 10;
@@ -95,6 +96,23 @@ export const toLocalDateTimeValue = (timestamp: number): string => {
   return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
 };
 
+export const groupedButtonLeft = (
+  center: number,
+  requestedSpacing: number,
+  count: number,
+  index: number,
+  size: number,
+): string => {
+  const spacing = count > 1 ? Math.min(requestedSpacing, 80 / (count - 1)) : 0;
+  const halfSpan = ((count - 1) * spacing) / 2;
+  const safeCenter = `clamp(calc(${size / 2}px + ${halfSpan}%), ${center}%, calc(100% - ${size / 2}px - ${halfSpan}%))`;
+  const offset = (index - (count - 1) / 2) * spacing;
+  if (offset === 0) {
+    return safeCenter;
+  }
+  return `calc(${safeCenter} ${offset < 0 ? '-' : '+'} ${Math.abs(offset)}%)`;
+};
+
 export const resolvePercentage = (value: FocusedPosition, fallback: number): number => {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) && String(value).trim() !== ''
@@ -103,7 +121,7 @@ export const resolvePercentage = (value: FocusedPosition, fallback: number): num
 };
 
 const buttonStyle = (button: PositionedOverlayButton, size: number) => ({
-  left: `clamp(${size / 2}px, ${button.x}%, calc(100% - ${size / 2}px))`,
+  left: button.left ?? `clamp(${size / 2}px, ${button.x}%, calc(100% - ${size / 2}px))`,
   top: `clamp(${size / 2}px, ${button.y}%, calc(100% - ${size / 2}px))`,
   width: `${size}px`,
   height: `${size}px`,
@@ -159,10 +177,15 @@ export class CameraCard extends LitElement {
   @state()
   private _recordingLoading = false;
 
+  @state()
+  private _recordingPanelOpen = false;
+
   private _loadingElements?: Promise<void>;
   private _documentOverflow = '';
   private _recordingRequest = 0;
   private _configEntryIDs = new Map<string, string>();
+  private _drawerPointerStart?: number;
+  private _drawerDragged = false;
 
   public static async getConfigElement(): Promise<CameraCardEditor> {
     await import('./editor.js');
@@ -282,6 +305,7 @@ export class CameraCard extends LitElement {
     this._recordingMode = false;
     this._recordingUrl = '';
     this._recordingLoading = false;
+    this._recordingPanelOpen = false;
     this._error = '';
   }
 
@@ -291,6 +315,7 @@ export class CameraCard extends LitElement {
       return;
     }
     this._recordingMode = true;
+    this._recordingPanelOpen = false;
     this._recordingStart = Date.now() - 5 * 60_000;
     void this._loadRecording(pair.main);
   }
@@ -363,6 +388,37 @@ export class CameraCard extends LitElement {
     this._selectRecordingTime(this._recordingStart + seconds * 1000, cameraEntity);
   }
 
+  private _drawerPointerDown(event: PointerEvent): void {
+    this._drawerPointerStart = event.clientX;
+    this._drawerDragged = false;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  private _drawerPointerUp(event: PointerEvent): void {
+    if (this._drawerPointerStart === undefined) {
+      return;
+    }
+    const distance = event.clientX - this._drawerPointerStart;
+    this._drawerPointerStart = undefined;
+    if (Math.abs(distance) < 20) {
+      return;
+    }
+    this._drawerDragged = true;
+    if (distance < 0) {
+      this._recordingPanelOpen = true;
+    } else {
+      this._recordingPanelOpen = false;
+    }
+  }
+
+  private _drawerClick(): void {
+    if (this._drawerDragged) {
+      this._drawerDragged = false;
+      return;
+    }
+    this._recordingPanelOpen = !this._recordingPanelOpen;
+  }
+
   private async _toggleFullscreen(): Promise<void> {
     if (this.hasAttribute('data-fullscreen-fallback')) {
       this._setFallbackFullscreen(false);
@@ -432,7 +488,6 @@ export class CameraCard extends LitElement {
     group: FocusedPresetGroup,
     size: number,
   ): Array<TemplateResult | typeof nothing> {
-    const centerOffset = (group.presets.length - 1) / 2;
     return group.presets.map((preset, index) =>
       this._renderOverlayButton(
         {
@@ -441,8 +496,16 @@ export class CameraCard extends LitElement {
           active_icon: preset.icon,
           x:
             resolvePercentage(group.x, 50) +
-            (index - centerOffset) * resolvePercentage(group.spacing, 12),
+            (index - (group.presets.length - 1) / 2) *
+              resolvePercentage(group.spacing, 12),
           y: resolvePercentage(group.y, 88),
+          left: groupedButtonLeft(
+            resolvePercentage(group.x, 50),
+            resolvePercentage(group.spacing, 12),
+            group.presets.length,
+            index,
+            size,
+          ),
         },
         size,
         preset.name,
@@ -491,14 +554,20 @@ export class CameraCard extends LitElement {
     const center = resolvePercentage(model.settings.controls.x, 90);
     const y = resolvePercentage(model.settings.controls.y, 8);
     const spacing = resolvePercentage(model.settings.controls.spacing, 8);
-    const centerOffset = (controls.length - 1) / 2;
     return controls.map((control, index) =>
       this._renderOverlayButton(
         {
           ...control.button,
           enabled: true,
-          x: center + (index - centerOffset) * spacing,
+          x: center + (index - (controls.length - 1) / 2) * spacing,
           y,
+          left: groupedButtonLeft(
+            center,
+            spacing,
+            controls.length,
+            index,
+            model.settings.button_size,
+          ),
         },
         model.settings.button_size,
         control.label,
@@ -523,56 +592,81 @@ export class CameraCard extends LitElement {
       timeStyle: 'short',
     }).format(this._recordingStart);
 
-    return html`<div class="recording-controls">
-      <div class="recording-controls-row">
-        <button
-          class="recording-action"
-          title="Previous 10 seconds"
-          aria-label="Previous 10 seconds"
-          @click=${() => this._shiftRecording(-RECORDING_CLIP_SECONDS, pair.main)}
-        >
-          <ha-icon icon="mdi:rewind-10"></ha-icon>
-        </button>
-        <input
-          class="recording-datetime"
-          type="datetime-local"
-          aria-label="Recording date and time"
-          .value=${toLocalDateTimeValue(this._recordingStart)}
-          max=${toLocalDateTimeValue(now - RECORDING_CLIP_SECONDS * 1000)}
-          @change=${(event: Event) => {
-            const value = (event.currentTarget as HTMLInputElement).value;
-            this._selectRecordingTime(new Date(value).getTime(), pair.main);
-          }}
-        />
-        <button
-          class="recording-action"
-          title="Next 10 seconds"
-          aria-label="Next 10 seconds"
-          @click=${() => this._shiftRecording(RECORDING_CLIP_SECONDS, pair.main)}
-        >
-          <ha-icon icon="mdi:fast-forward-10"></ha-icon>
-        </button>
-        <button class="live-action" @click=${this._closeRecording}>
-          <span class="live-dot"></span>Live
-        </button>
-      </div>
-      <div class="recording-scrubber-row">
-        <input
-          class="recording-scrubber"
-          type="range"
-          min=${-RECORDING_SCRUB_MINUTES}
-          max="-1"
-          step="1"
-          .value=${String(minutesFromNow)}
-          aria-label="Recording time within the last 24 hours"
-          @input=${(event: Event) => {
-            const minutes = Number((event.currentTarget as HTMLInputElement).value);
-            this._recordingStart = Date.now() + minutes * 60_000;
-          }}
-          @change=${() => void this._loadRecording(pair.main)}
-        />
-        <span>${label}</span>
-      </div>
+    return html`<div class="recording-drawer ${this._recordingPanelOpen ? 'open' : ''}">
+      <button
+        class="recording-pull-tab"
+        title=${this._recordingPanelOpen
+          ? 'Hide recording timeline'
+          : 'Show recording timeline'}
+        aria-label=${this._recordingPanelOpen
+          ? 'Hide recording timeline'
+          : 'Show recording timeline'}
+        aria-expanded=${this._recordingPanelOpen ? 'true' : 'false'}
+        @pointerdown=${this._drawerPointerDown}
+        @pointerup=${this._drawerPointerUp}
+        @pointercancel=${() => {
+          this._drawerPointerStart = undefined;
+          this._drawerDragged = false;
+        }}
+        @click=${this._drawerClick}
+      >
+        <ha-icon
+          icon=${this._recordingPanelOpen ? 'mdi:chevron-right' : 'mdi:calendar-clock'}
+        ></ha-icon>
+      </button>
+      ${this._recordingPanelOpen
+        ? html`<div class="recording-controls-row">
+              <button
+                class="recording-action"
+                title="Previous 10 seconds"
+                aria-label="Previous 10 seconds"
+                @click=${() => this._shiftRecording(-RECORDING_CLIP_SECONDS, pair.main)}
+              >
+                <ha-icon icon="mdi:rewind-10"></ha-icon>
+              </button>
+              <input
+                class="recording-datetime"
+                type="datetime-local"
+                aria-label="Recording date and time"
+                .value=${toLocalDateTimeValue(this._recordingStart)}
+                max=${toLocalDateTimeValue(now - RECORDING_CLIP_SECONDS * 1000)}
+                @change=${(event: Event) => {
+                  const value = (event.currentTarget as HTMLInputElement).value;
+                  this._selectRecordingTime(new Date(value).getTime(), pair.main);
+                }}
+              />
+              <button
+                class="recording-action"
+                title="Next 10 seconds"
+                aria-label="Next 10 seconds"
+                @click=${() => this._shiftRecording(RECORDING_CLIP_SECONDS, pair.main)}
+              >
+                <ha-icon icon="mdi:fast-forward-10"></ha-icon>
+              </button>
+              <button class="live-action" @click=${this._closeRecording}>
+                <span class="live-dot"></span>Live
+              </button>
+            </div>
+            <div class="recording-scrubber-row">
+              <input
+                class="recording-scrubber"
+                type="range"
+                min=${-RECORDING_SCRUB_MINUTES}
+                max="-1"
+                step="1"
+                .value=${String(minutesFromNow)}
+                aria-label="Recording time within the last 24 hours"
+                @input=${(event: Event) => {
+                  const minutes = Number(
+                    (event.currentTarget as HTMLInputElement).value,
+                  );
+                  this._recordingStart = Date.now() + minutes * 60_000;
+                }}
+                @change=${() => void this._loadRecording(pair.main)}
+              />
+              <span>${label}</span>
+            </div>`
+        : nothing}
     </div>`;
   }
 
@@ -789,20 +883,46 @@ export class CameraCard extends LitElement {
       font-size: 12px;
     }
 
-    .recording-controls {
+    .recording-drawer {
       position: absolute;
-      bottom: 56px;
-      left: 50%;
+      top: 50%;
+      right: 0;
       z-index: 4;
       display: grid;
-      width: min(620px, calc(100% - 96px));
+      width: min(360px, calc(100% - 52px));
       gap: 6px;
       padding: 8px;
-      transform: translateX(-50%);
-      border-radius: 8px;
+      transform: translate(100%, -50%);
+      border-radius: 8px 0 0 8px;
       background: rgba(0, 0, 0, 0.66);
       box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
       backdrop-filter: blur(6px);
+      transition: transform 180ms ease;
+      box-sizing: border-box;
+    }
+
+    .recording-drawer.open {
+      transform: translate(0, -50%);
+    }
+
+    .recording-pull-tab {
+      position: absolute;
+      top: 50%;
+      left: -44px;
+      display: grid;
+      width: 44px;
+      height: 64px;
+      place-items: center;
+      padding: 0;
+      transform: translateY(-50%);
+      border-radius: 8px 0 0 8px;
+      background: rgba(0, 0, 0, 0.66);
+      box-shadow: -1px 1px 4px rgba(0, 0, 0, 0.3);
+      touch-action: none;
+    }
+
+    .recording-pull-tab ha-icon {
+      --mdc-icon-size: 24px;
     }
 
     .recording-controls-row,
@@ -866,9 +986,8 @@ export class CameraCard extends LitElement {
     }
 
     @media (max-width: 600px) {
-      .recording-controls {
-        bottom: 52px;
-        width: calc(100% - 64px);
+      .recording-drawer {
+        width: calc(100% - 48px);
         padding: 6px;
       }
 
