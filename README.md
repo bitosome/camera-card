@@ -76,13 +76,17 @@ the most recent five minutes and provides:
 - One full-day timeline for the selected calendar date, from midnight to midnight in
   Home Assistant's timezone.
 - Play/pause, mute, and previous/next 10-second controls.
+- Playback speed selection from `0.5×` to `2×`.
 - A calendar control immediately before **Live** for selecting a date. Selecting a
   date starts playback at the beginning of that day.
+- Previous-day and next-day buttons, with future days disabled.
 - Automatic playback of the following clip, avoiding the long wait and very large
   download produced by a single lengthy UniFi export.
 - On the current day, the future portion of the timeline is gray and cannot be
   selected. Unavailable recording ranges reported while browsing older footage are
   marked with a striped gray segment.
+- A dismissible recording-unavailable message contained inside the player instead of
+  overlapping its controls.
 - A **Live** button that returns to the camera stream.
 
 The card deliberately replaces browser-native video controls so mobile browsers do

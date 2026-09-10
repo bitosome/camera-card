@@ -131,6 +131,17 @@ describe('focused card', () => {
       config: { time_zone: 'UTC' },
     } as HomeAssistant;
     expect(formatHassDateTime(timestamp, twelveHourHass)).toBe('9/8/2026, 12:34:00 PM');
+
+    const yearFirstHass = {
+      locale: {
+        language: 'en-GB',
+        time_format: '24',
+        date_format: 'YMD',
+        time_zone: 'server',
+      },
+      config: { time_zone: 'UTC' },
+    } as HomeAssistant;
+    expect(formatHassDateTime(timestamp, yearFirstHass)).toBe('2026/09/08, 12:34:00');
   });
 
   it('uses Home Assistant calendar days and caps an unfinished day at now', () => {
@@ -252,11 +263,24 @@ describe('focused card', () => {
     expect(
       card.shadowRoot?.querySelector('[aria-label="Unmute recording"]'),
     ).not.toBeNull();
+    const speed = card.shadowRoot?.querySelector<HTMLSelectElement>(
+      '[aria-label="Playback speed"]',
+    );
+    expect(speed).not.toBeNull();
+    if (speed) {
+      speed.value = '2';
+      speed.dispatchEvent(new Event('change'));
+    }
+    expect(
+      card.shadowRoot?.querySelector<HTMLVideoElement>('.recording-video')?.playbackRate,
+    ).toBe(2);
 
     const timeline = card.shadowRoot?.querySelector<HTMLInputElement>(
       '[aria-label="Recording playback time"]',
     );
-    expect(Number(timeline?.max) - Number(timeline?.min)).toBe(24 * 60 * 60);
+    expect([23, 24, 25].map((hours) => hours * 60 * 60)).toContain(
+      Number(timeline?.max) - Number(timeline?.min),
+    );
     expect(
       parseFloat(
         card.shadowRoot
@@ -294,6 +318,11 @@ describe('focused card', () => {
     expect(dateInput).not.toBeNull();
     expect(dateInput?.type).toBe('date');
     expect(card.shadowRoot?.querySelector('.recording-pull-tab')).toBeNull();
+    expect(card.shadowRoot?.querySelector('[aria-label="Previous day"]')).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector<HTMLButtonElement>('[aria-label="Next day"]')
+        ?.disabled,
+    ).toBe(true);
     expect(dateInput?.closest('.recording-date-action')?.nextElementSibling).toBe(
       card.shadowRoot?.querySelector('.live-action'),
     );
@@ -303,6 +332,23 @@ describe('focused card', () => {
       ?.dispatchEvent(new Event('error'));
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('.recording-gap')).not.toBeNull();
+    expect(card.shadowRoot?.querySelector('.recording-notice')).not.toBeNull();
+    expect(card.shadowRoot?.querySelector('.error')).toBeNull();
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss recording message"]')
+      ?.click();
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector('.recording-notice')).toBeNull();
+
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Previous day"]')
+      ?.click();
+    await vi.waitFor(() => expect(callWS).toHaveBeenCalledTimes(4));
+    await card.updateComplete;
+    expect(
+      card.shadowRoot?.querySelector<HTMLButtonElement>('[aria-label="Next day"]')
+        ?.disabled,
+    ).toBe(false);
     expect(callWS).toHaveBeenNthCalledWith(1, {
       type: 'config/entity_registry/get',
       entity_id: 'camera.main',

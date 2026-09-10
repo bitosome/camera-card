@@ -135,21 +135,23 @@ export const formatHassDate = (timestamp: number, hass: HomeAssistant): string =
     return formatter.format(timestamp);
   }
   const parts = formatter.formatToParts(timestamp);
-  const values = Object.fromEntries(
-    parts
-      .filter(
-        (part) => part.type === 'day' || part.type === 'month' || part.type === 'year',
-      )
-      .map((part) => [part.type, part.value]),
-  );
-  const separator = parts.find((part) => part.type === 'literal')?.value ?? '/';
-  const order =
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const separator = value('literal');
+  const order: Intl.DateTimeFormatPartTypes[] =
     preference === 'DMY'
       ? ['day', 'month', 'year']
       : preference === 'MDY'
         ? ['month', 'day', 'year']
         : ['year', 'month', 'day'];
-  return order.map((part) => values[part]).join(separator);
+  const lastPart = parts[parts.length - 1];
+  const trailingLiteral =
+    hassLanguage(hass) === 'bg' && preference === 'YMD'
+      ? ''
+      : lastPart?.type === 'literal'
+        ? lastPart.value
+        : '';
+  return `${order.map((part) => value(part)).join(separator)}${trailingLiteral}`;
 };
 
 export const formatHassTime = (timestamp: number, hass: HomeAssistant): string => {
@@ -362,6 +364,12 @@ export class CameraCard extends LitElement {
   private _recordingMuted = true;
 
   @state()
+  private _recordingRate = 1;
+
+  @state()
+  private _recordingNotice = '';
+
+  @state()
   private _recordingPosition = this._recordingStart;
 
   @state()
@@ -502,6 +510,7 @@ export class CameraCard extends LitElement {
     this._recordingDateEditing = false;
     this._recordingPaused = false;
     this._recordingMuted = true;
+    this._recordingNotice = '';
     this._recordingSeeking = false;
     this._recordingPosition = this._recordingStart;
     this._error = '';
@@ -515,6 +524,7 @@ export class CameraCard extends LitElement {
     this._recordingMode = true;
     this._recordingPaused = false;
     this._recordingMuted = true;
+    this._recordingNotice = '';
     this._recordingStart = Date.now() - 5 * 60_000;
     this._recordingPosition = this._recordingStart;
     if (this.hass) {
@@ -551,6 +561,7 @@ export class CameraCard extends LitElement {
     this._recordingLoading = true;
     this._recordingUrl = '';
     this._error = '';
+    this._recordingNotice = '';
     try {
       const configEntryID = await this._configEntryID(cameraEntity);
       const { start, end } = recordingClipWindow(this._recordingStart);
@@ -576,7 +587,7 @@ export class CameraCard extends LitElement {
     } catch (error) {
       if (request === this._recordingRequest) {
         this._recordingLoading = false;
-        this._error =
+        this._recordingNotice =
           error instanceof Error ? error.message : 'Could not load recording.';
       }
     }
@@ -610,14 +621,29 @@ export class CameraCard extends LitElement {
   }
 
   private _advanceRecording(cameraEntity: string): void {
-    this._selectRecordingTime(
-      this._recordingStart + RECORDING_CLIP_SECONDS * 1000,
-      cameraEntity,
-    );
+    const next = this._recordingStart + RECORDING_CLIP_SECONDS * 1000;
+    const todayStart = this.hass ? recordingDayWindow(Date.now(), this.hass).start : 0;
+    if (
+      this._recordingDayStart === todayStart &&
+      next > recordingPlayableEnd(this._recordingDayEnd)
+    ) {
+      this._recordingPaused = true;
+      return;
+    }
+    this._selectRecordingTime(next, cameraEntity);
   }
 
   private _seekRecording(seconds: number, cameraEntity: string): void {
     this._selectRecordingTime(this._recordingPosition + seconds * 1000, cameraEntity);
+  }
+
+  private _changeRecordingDay(offset: -1 | 1, cameraEntity: string): void {
+    if (!this.hass) {
+      return;
+    }
+    const timestamp = offset < 0 ? this._recordingDayStart - 1 : this._recordingDayEnd;
+    const day = recordingDayWindow(timestamp, this.hass);
+    this._selectRecordingTime(day.start, cameraEntity, true);
   }
 
   private async _toggleRecordingPlayback(): Promise<void> {
@@ -630,8 +656,9 @@ export class CameraCard extends LitElement {
         await video.play();
         this._recordingPaused = false;
         this._error = '';
+        this._recordingNotice = '';
       } catch {
-        this._error = 'The browser prevented recording playback.';
+        this._recordingNotice = 'The browser prevented recording playback.';
       }
     } else {
       video.pause();
@@ -647,10 +674,20 @@ export class CameraCard extends LitElement {
     }
   }
 
+  private _setRecordingRate(rate: number): void {
+    this._recordingRate = rate;
+    const video = this.renderRoot.querySelector<HTMLVideoElement>('.recording-video');
+    if (video) {
+      video.playbackRate = rate;
+    }
+  }
+
   private _recordingCanPlay(event: Event): void {
     const video = event.currentTarget as HTMLVideoElement;
     this._recordingLoading = false;
     video.muted = this._recordingMuted;
+    video.playbackRate = this._recordingRate;
+    this._recordingNotice = '';
     if (!this._recordingPaused) {
       void video.play().catch(() => {
         this._recordingPaused = true;
@@ -889,8 +926,22 @@ export class CameraCard extends LitElement {
       }));
     const date = formatHassDate(position, this.hass);
     const time = formatHassTime(position, this.hass);
+    const todayStart = recordingDayWindow(Date.now(), this.hass).start;
+    const canSelectNextDay = this._recordingDayStart < todayStart;
 
     return html`<div class="recording-player">
+      ${this._recordingNotice
+        ? html`<div class="recording-notice" role="status">
+            <span>${this._recordingNotice}</span>
+            <button
+              title="Dismiss"
+              aria-label="Dismiss recording message"
+              @click=${() => (this._recordingNotice = '')}
+            >
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>`
+        : nothing}
       <div class="recording-timeline">
         <div
           class="recording-range"
@@ -937,6 +988,21 @@ export class CameraCard extends LitElement {
           <span class="recording-date">${date}</span>
           <span>${time}</span>
         </time>
+        <select
+          class="recording-speed"
+          title="Playback speed"
+          aria-label="Playback speed"
+          .value=${String(this._recordingRate)}
+          @change=${(event: Event) =>
+            this._setRecordingRate(
+              Number((event.currentTarget as HTMLSelectElement).value),
+            )}
+        >
+          <option value="0.5">0.5×</option>
+          <option value="1">1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
       </div>
       <div class="recording-player-actions">
         <button
@@ -972,6 +1038,23 @@ export class CameraCard extends LitElement {
           <ha-icon
             icon=${this._recordingMuted ? 'mdi:volume-off' : 'mdi:volume-high'}
           ></ha-icon>
+        </button>
+        <button
+          class="player-action"
+          title="Previous day"
+          aria-label="Previous day"
+          @click=${() => this._changeRecordingDay(-1, pair.main)}
+        >
+          <ha-icon icon="mdi:calendar-arrow-left"></ha-icon>
+        </button>
+        <button
+          class="player-action"
+          title="Next day"
+          aria-label="Next day"
+          ?disabled=${!canSelectNextDay}
+          @click=${() => this._changeRecordingDay(1, pair.main)}
+        >
+          <ha-icon icon="mdi:calendar-arrow-right"></ha-icon>
         </button>
         <label class="player-action recording-date-action" title="Choose recording date">
           <ha-icon icon="mdi:calendar-clock"></ha-icon>
@@ -1039,6 +1122,7 @@ export class CameraCard extends LitElement {
                 src=${this._recordingUrl}
                 ?autoplay=${!this._recordingPaused}
                 .muted=${this._recordingMuted}
+                .playbackRate=${this._recordingRate}
                 playsinline
                 aria-label="Recording video"
                 @click=${() => void this._toggleRecordingPlayback()}
@@ -1055,7 +1139,7 @@ export class CameraCard extends LitElement {
                 @error=${() => {
                   this._recordingLoading = false;
                   this._markRecordingUnavailable(pair.main);
-                  this._error =
+                  this._recordingNotice =
                     'Recording could not be played. UniFi Protect media requires Full access mode and available footage.';
                 }}
               ></video>`
@@ -1100,7 +1184,18 @@ export class CameraCard extends LitElement {
         ${!this._recordingMode && presetGroup?.device_id
           ? this._renderPresets(presetGroup, model.settings.button_size)
           : nothing}
-        ${this._error ? html`<div class="error">${this._error}</div>` : nothing}
+        ${this._error
+          ? html`<div class="error" role="alert">
+              <span>${this._error}</span>
+              <button
+                title="Dismiss"
+                aria-label="Dismiss error"
+                @click=${() => (this._error = '')}
+              >
+                <ha-icon icon="mdi:close"></ha-icon>
+              </button>
+            </div>`
+          : nothing}
       </div>
     </ha-card>`;
   }
@@ -1240,6 +1335,29 @@ export class CameraCard extends LitElement {
       font-size: 12px;
     }
 
+    .error,
+    .recording-notice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .error button,
+    .recording-notice button {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 auto;
+      place-items: center;
+      padding: 0;
+      background: transparent;
+    }
+
+    .error ha-icon,
+    .recording-notice ha-icon {
+      --mdc-icon-size: 18px;
+    }
+
     .recording-datetime {
       position: absolute;
       inset: 0;
@@ -1277,6 +1395,14 @@ export class CameraCard extends LitElement {
       background: rgba(0, 0, 0, 0.66);
       backdrop-filter: blur(6px);
       box-sizing: border-box;
+    }
+
+    .recording-notice {
+      justify-content: space-between;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: var(--error-color, #db4437);
+      font-size: 12px;
     }
 
     .recording-timeline,
@@ -1378,6 +1504,18 @@ export class CameraCard extends LitElement {
       font-variant-numeric: tabular-nums;
     }
 
+    .recording-speed {
+      height: 28px;
+      padding: 0 4px;
+      border: 0;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.14);
+      color: white;
+      color-scheme: dark;
+      font: inherit;
+      cursor: pointer;
+    }
+
     .player-action,
     .live-action {
       display: inline-flex;
@@ -1403,6 +1541,11 @@ export class CameraCard extends LitElement {
 
     .player-primary {
       background: var(--primary-color, #03a9f4);
+    }
+
+    .player-action:disabled {
+      opacity: 0.35;
+      cursor: default;
     }
 
     .live-action {
@@ -1444,6 +1587,19 @@ export class CameraCard extends LitElement {
 
       .live-action {
         font-size: 12px;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .recording-timeline,
+      .recording-player-actions {
+        gap: 2px;
+      }
+
+      .player-action,
+      .live-action {
+        min-width: 30px;
+        padding: 0 4px;
       }
     }
   `;

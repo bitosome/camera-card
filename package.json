@@ -1,6 +1,6 @@
 {
   "name": "camera-card",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Focused Home Assistant camera card with UniFi Protect recordings and PTZ presets",
   "keywords": [
     "camera",
