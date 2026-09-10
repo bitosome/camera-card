@@ -76,7 +76,7 @@ the most recent five minutes and provides:
 - One compact 30-minute absolute timeline that tracks the real recording time and can
   be dragged to any second in its window.
 - Play/pause, mute, and previous/next 10-second controls.
-- An exact local date and time field for older footage in the collapsible side drawer.
+- A calendar control immediately before **Live** for selecting older footage.
 - Automatic playback of the following clip, avoiding the long wait and very large
   download produced by a single lengthy UniFi export.
 - A **Live** button that returns to the camera stream.
@@ -85,8 +85,8 @@ The card deliberately replaces browser-native video controls so mobile browsers 
 not add a second, clip-relative scrubber. Seeking loads only the required short clip
 instead of a large export.
 
-The date/time selector stays collapsed while footage plays. Its tab remains fixed to
-the right edge of the video; pull or tap it to open or close the compact selector.
+Displayed timestamps and calendar values follow Home Assistant's selected language,
+12/24-hour preference, date order, and local/server timezone setting.
 
 Playback uses Home Assistant's authenticated UniFi Protect video endpoint; camera
 credentials never reach the card. The UniFi Protect integration must use **Full

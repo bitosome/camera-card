@@ -3,12 +3,14 @@ import {
   CameraCard,
   callUniFiPreset,
   createUniFiRecordingPath,
+  formatHassDateTime,
   groupedButtonLeft,
   isFocusedCardFullscreen,
+  parseHassDateTimeValue,
   recordingClipWindow,
   recordingSeekWindow,
   resolvePercentage,
-  toLocalDateTimeValue,
+  toHassDateTimeValue,
   toggleFocusedCardFullscreen,
   type FocusedFullscreenAPI,
 } from '../../src/focused/card';
@@ -95,13 +97,36 @@ describe('focused card', () => {
     );
   });
 
-  it('keeps recording clips in the past and formats local input values', () => {
+  it('keeps clips in the past and honors Home Assistant date/time settings', () => {
     const now = Date.parse('2026-09-08T12:00:00.000Z');
     const { start, end } = recordingClipWindow(now + 60_000, now);
+    const hass = {
+      locale: {
+        language: 'en-GB',
+        time_format: '24',
+        date_format: 'DMY',
+        time_zone: 'server',
+      },
+      config: { time_zone: 'Europe/Tallinn' },
+    } as HomeAssistant;
+    const timestamp = Date.parse('2026-09-08T12:34:00.000Z');
 
     expect(start.getTime()).toBe(now - 10_000);
     expect(end.getTime()).toBe(now);
-    expect(toLocalDateTimeValue(start.getTime())).toMatch(/^2026-09-08T\d{2}:\d{2}$/);
+    expect(toHassDateTimeValue(timestamp, hass)).toBe('2026-09-08T15:34');
+    expect(parseHassDateTimeValue('2026-09-08T15:34', hass)).toBe(timestamp);
+    expect(formatHassDateTime(timestamp, hass)).toBe('08/09/2026, 15:34:00');
+
+    const twelveHourHass = {
+      locale: {
+        language: 'en-US',
+        time_format: '12',
+        date_format: 'MDY',
+        time_zone: 'server',
+      },
+      config: { time_zone: 'UTC' },
+    } as HomeAssistant;
+    expect(formatHassDateTime(timestamp, twelveHourHass)).toBe('9/8/2026, 12:34:00 PM');
   });
 
   it('centers a 30-minute seek window unless it would extend into live video', () => {
@@ -233,12 +258,12 @@ describe('focused card', () => {
       card.shadowRoot?.querySelector('[aria-label="Play recording"]'),
     ).not.toBeNull();
 
-    expect(card.shadowRoot?.querySelector('.recording-datetime')).toBeNull();
-    card.shadowRoot
-      ?.querySelector<HTMLButtonElement>('[aria-label="Show recording time selector"]')
-      ?.click();
-    await card.updateComplete;
-    expect(card.shadowRoot?.querySelector('.recording-datetime')).not.toBeNull();
+    const dateInput = card.shadowRoot?.querySelector('.recording-datetime');
+    expect(dateInput).not.toBeNull();
+    expect(card.shadowRoot?.querySelector('.recording-pull-tab')).toBeNull();
+    expect(dateInput?.closest('.recording-date-action')?.nextElementSibling).toBe(
+      card.shadowRoot?.querySelector('.live-action'),
+    );
     expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);
     expect(callWS).toHaveBeenNthCalledWith(1, {
       type: 'config/entity_registry/get',

@@ -90,10 +90,132 @@ export const createUniFiRecordingPath = (
 ): string =>
   `/api/unifiprotect/video/${encodeURIComponent(configEntryID)}/${encodeURIComponent(cameraEntity)}/${encodeURIComponent(start.toISOString())}/${encodeURIComponent(end.toISOString())}`;
 
-export const toLocalDateTimeValue = (timestamp: number): string => {
-  const date = new Date(timestamp);
-  const part = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+const hassLanguage = (hass: HomeAssistant): string | undefined =>
+  hass.locale?.language ?? hass.language;
+
+export const hassTimeZone = (hass: HomeAssistant): string | undefined => {
+  const server = hass.config?.time_zone;
+  if (hass.locale?.time_zone !== 'local') {
+    return server;
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || server;
+};
+
+const hassUsesAmPm = (hass: HomeAssistant): boolean => {
+  const preference = hass.locale?.time_format;
+  if (preference === '12') {
+    return true;
+  }
+  if (preference === '24') {
+    return false;
+  }
+  const language = preference === 'system' ? undefined : hassLanguage(hass);
+  const hourCycle = new Intl.DateTimeFormat(language, {
+    hour: 'numeric',
+  }).resolvedOptions().hourCycle;
+  return hourCycle === 'h11' || hourCycle === 'h12';
+};
+
+export const formatHassDate = (timestamp: number, hass: HomeAssistant): string => {
+  const preference = hass.locale?.date_format ?? 'language';
+  const formatter = new Intl.DateTimeFormat(
+    preference === 'system' ? undefined : hassLanguage(hass),
+    {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      timeZone: hassTimeZone(hass),
+    },
+  );
+  if (preference === 'language' || preference === 'system') {
+    return formatter.format(timestamp);
+  }
+  const parts = formatter.formatToParts(timestamp);
+  const values = Object.fromEntries(
+    parts
+      .filter(
+        (part) => part.type === 'day' || part.type === 'month' || part.type === 'year',
+      )
+      .map((part) => [part.type, part.value]),
+  );
+  const separator = parts.find((part) => part.type === 'literal')?.value ?? '/';
+  const order =
+    preference === 'DMY'
+      ? ['day', 'month', 'year']
+      : preference === 'MDY'
+        ? ['month', 'day', 'year']
+        : ['year', 'month', 'day'];
+  return order.map((part) => values[part]).join(separator);
+};
+
+export const formatHassTime = (timestamp: number, hass: HomeAssistant): string => {
+  const amPm = hassUsesAmPm(hass);
+  return new Intl.DateTimeFormat(hassLanguage(hass), {
+    hour: amPm ? 'numeric' : '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: amPm ? 'h12' : 'h23',
+    timeZone: hassTimeZone(hass),
+  }).format(timestamp);
+};
+
+export const formatHassDateTime = (timestamp: number, hass: HomeAssistant): string =>
+  `${formatHassDate(timestamp, hass)}, ${formatHassTime(timestamp, hass)}`;
+
+const dateTimeParts = (
+  timestamp: number,
+  timeZone: string | undefined,
+): Record<string, number> =>
+  Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+      timeZone,
+    })
+      .formatToParts(timestamp)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  );
+
+export const toHassDateTimeValue = (timestamp: number, hass: HomeAssistant): string => {
+  const parts = dateTimeParts(timestamp, hassTimeZone(hass));
+  const value = (part: string) => String(parts[part]).padStart(2, '0');
+  return `${parts.year}-${value('month')}-${value('day')}T${value('hour')}:${value('minute')}`;
+};
+
+export const parseHassDateTimeValue = (value: string, hass: HomeAssistant): number => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, year, month, day, hour, minute] = match.map(Number);
+  const expected = Date.UTC(year, month - 1, day, hour, minute);
+  const timeZone = hassTimeZone(hass);
+  let timestamp = expected;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = dateTimeParts(timestamp, timeZone);
+    const represented = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+    );
+    timestamp += expected - represented;
+  }
+  const result = dateTimeParts(timestamp, timeZone);
+  return result.year === year &&
+    result.month === month &&
+    result.day === day &&
+    result.hour === hour &&
+    result.minute === minute
+    ? timestamp
+    : Number.NaN;
 };
 
 export const recordingSeekWindow = (
@@ -188,9 +310,6 @@ export class CameraCard extends LitElement {
   private _recordingLoading = false;
 
   @state()
-  private _recordingPanelOpen = false;
-
-  @state()
   private _recordingDateDraft = '';
 
   @state()
@@ -212,9 +331,8 @@ export class CameraCard extends LitElement {
   private _documentOverflow = '';
   private _recordingRequest = 0;
   private _recordingSeeking = false;
+  private _recordingDateEditing = false;
   private _configEntryIDs = new Map<string, string>();
-  private _drawerPointerStart?: number;
-  private _drawerDragged = false;
 
   public static async getConfigElement(): Promise<CameraCardEditor> {
     await import('./editor.js');
@@ -334,8 +452,8 @@ export class CameraCard extends LitElement {
     this._recordingMode = false;
     this._recordingUrl = '';
     this._recordingLoading = false;
-    this._recordingPanelOpen = false;
     this._recordingDateDraft = '';
+    this._recordingDateEditing = false;
     this._recordingPaused = false;
     this._recordingMuted = true;
     this._recordingSeeking = false;
@@ -349,11 +467,13 @@ export class CameraCard extends LitElement {
       return;
     }
     this._recordingMode = true;
-    this._recordingPanelOpen = false;
     this._recordingPaused = false;
     this._recordingMuted = true;
     this._recordingStart = Date.now() - 5 * 60_000;
     this._recordingPosition = this._recordingStart;
+    if (this.hass) {
+      this._recordingDateDraft = toHassDateTimeValue(this._recordingStart, this.hass);
+    }
     this._setRecordingSeekWindow(this._recordingStart);
     void this._loadRecording(pair.main);
   }
@@ -390,6 +510,9 @@ export class CameraCard extends LitElement {
       const { start, end } = recordingClipWindow(this._recordingStart);
       this._recordingStart = start.getTime();
       this._recordingPosition = this._recordingStart;
+      if (!this._recordingDateEditing) {
+        this._recordingDateDraft = toHassDateTimeValue(this._recordingStart, this.hass);
+      }
       const unsignedPath = createUniFiRecordingPath(
         configEntryID,
         cameraEntity,
@@ -499,44 +622,6 @@ export class CameraCard extends LitElement {
     const position = this._recordingStart + video.currentTime * 1000;
     if (Math.abs(position - this._recordingPosition) >= 500) {
       this._recordingPosition = position;
-    }
-  }
-
-  private _drawerPointerDown(event: PointerEvent): void {
-    this._drawerPointerStart = event.clientX;
-    this._drawerDragged = false;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  }
-
-  private _drawerPointerUp(event: PointerEvent): void {
-    if (this._drawerPointerStart === undefined) {
-      return;
-    }
-    const distance = event.clientX - this._drawerPointerStart;
-    this._drawerPointerStart = undefined;
-    if (Math.abs(distance) < 20) {
-      return;
-    }
-    this._drawerDragged = true;
-    if (distance < 0) {
-      this._setRecordingPanel(true);
-    } else {
-      this._setRecordingPanel(false);
-    }
-  }
-
-  private _drawerClick(): void {
-    if (this._drawerDragged) {
-      this._drawerDragged = false;
-      return;
-    }
-    this._setRecordingPanel(!this._recordingPanelOpen);
-  }
-
-  private _setRecordingPanel(open: boolean): void {
-    this._recordingPanelOpen = open;
-    if (open) {
-      this._recordingDateDraft = toLocalDateTimeValue(this._recordingStart);
     }
   }
 
@@ -702,69 +787,16 @@ export class CameraCard extends LitElement {
     return this._hd && pair.hd ? pair.hd : pair.main;
   }
 
-  private _renderRecordingControls(pair: FocusedCameraPair): TemplateResult {
-    const now = Date.now();
-    return html`<button
-        class="recording-pull-tab"
-        title=${this._recordingPanelOpen
-          ? 'Hide recording time selector'
-          : 'Show recording time selector'}
-        aria-label=${this._recordingPanelOpen
-          ? 'Hide recording time selector'
-          : 'Show recording time selector'}
-        aria-expanded=${this._recordingPanelOpen ? 'true' : 'false'}
-        @pointerdown=${this._drawerPointerDown}
-        @pointerup=${this._drawerPointerUp}
-        @pointercancel=${() => {
-          this._drawerPointerStart = undefined;
-          this._drawerDragged = false;
-        }}
-        @click=${this._drawerClick}
-      >
-        <ha-icon
-          icon=${this._recordingPanelOpen ? 'mdi:chevron-right' : 'mdi:calendar-clock'}
-        ></ha-icon>
-      </button>
-      <div class="recording-drawer ${this._recordingPanelOpen ? 'open' : ''}">
-        ${this._recordingPanelOpen
-          ? html`<label class="recording-date-selector">
-              <span>Jump to recording time</span>
-              <input
-                class="recording-datetime"
-                type="datetime-local"
-                aria-label="Recording date and time"
-                .value=${this._recordingDateDraft}
-                max=${toLocalDateTimeValue(now - RECORDING_CLIP_SECONDS * 1000)}
-                @input=${(event: Event) => {
-                  this._recordingDateDraft = (
-                    event.currentTarget as HTMLInputElement
-                  ).value;
-                }}
-                @change=${(event: Event) => {
-                  const value = (event.currentTarget as HTMLInputElement).value;
-                  const timestamp = new Date(value).getTime();
-                  if (Number.isFinite(timestamp)) {
-                    this._selectRecordingTime(timestamp, pair.main, true);
-                    this._setRecordingPanel(false);
-                  }
-                }}
-              />
-            </label>`
-          : nothing}
-      </div>`;
-  }
-
   private _renderRecordingPlayer(pair: FocusedCameraPair): TemplateResult {
+    if (!this.hass) {
+      return html``;
+    }
     const position = Math.min(
       this._recordingSeekEnd,
       Math.max(this._recordingSeekStart, this._recordingPosition),
     );
-    const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(
-      position,
-    );
-    const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'medium' }).format(
-      position,
-    );
+    const date = formatHassDate(position, this.hass);
+    const time = formatHassTime(position, this.hass);
 
     return html`<div class="recording-player">
       <div class="recording-timeline">
@@ -828,6 +860,44 @@ export class CameraCard extends LitElement {
             icon=${this._recordingMuted ? 'mdi:volume-off' : 'mdi:volume-high'}
           ></ha-icon>
         </button>
+        <label
+          class="player-action recording-date-action"
+          title="Choose recording date and time"
+        >
+          <ha-icon icon="mdi:calendar-clock"></ha-icon>
+          <input
+            class="recording-datetime"
+            type="datetime-local"
+            lang=${hassLanguage(this.hass) ?? ''}
+            aria-label="Choose recording date and time"
+            .value=${this._recordingDateDraft}
+            max=${toHassDateTimeValue(
+              Date.now() - RECORDING_CLIP_SECONDS * 1000,
+              this.hass,
+            )}
+            @click=${() => {
+              this._recordingDateEditing = true;
+            }}
+            @focus=${() => {
+              this._recordingDateEditing = true;
+            }}
+            @input=${(event: Event) => {
+              this._recordingDateDraft = (event.currentTarget as HTMLInputElement).value;
+            }}
+            @change=${(event: Event) => {
+              const value = (event.currentTarget as HTMLInputElement).value;
+              this._recordingDateDraft = value;
+              this._recordingDateEditing = false;
+              const timestamp = parseHassDateTimeValue(value, this.hass!);
+              if (Number.isFinite(timestamp)) {
+                this._selectRecordingTime(timestamp, pair.main, true);
+              }
+            }}
+            @blur=${() => {
+              this._recordingDateEditing = false;
+            }}
+          />
+        </label>
         <button
           class="live-action"
           title="Return to live view"
@@ -919,7 +989,6 @@ export class CameraCard extends LitElement {
           : nothing}
         ${this._renderControls(pair, model)}
         ${this._recordingMode ? this._renderRecordingPlayer(pair) : nothing}
-        ${this._recordingMode ? this._renderRecordingControls(pair) : nothing}
         ${!this._recordingMode && presetGroup?.device_id
           ? this._renderPresets(presetGroup, model.settings.button_size)
           : nothing}
@@ -1063,69 +1132,28 @@ export class CameraCard extends LitElement {
       font-size: 12px;
     }
 
-    .recording-drawer {
-      position: absolute;
-      top: 50%;
-      right: 48px;
-      z-index: 4;
-      display: grid;
-      width: min(300px, calc(100% - 64px));
-      padding: 10px;
-      transform: translate(calc(100% + 60px), -50%);
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.66);
-      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(6px);
-      transition: transform 180ms ease;
-      box-sizing: border-box;
-    }
-
-    .recording-drawer.open {
-      transform: translate(0, -50%);
-    }
-
-    .recording-pull-tab {
-      position: absolute;
-      top: 32%;
-      right: 0;
-      z-index: 5;
-      display: grid;
-      width: 44px;
-      height: 52px;
-      place-items: center;
-      padding: 0;
-      transform: translateY(-50%);
-      border-radius: 8px 0 0 8px;
-      background: rgba(0, 0, 0, 0.66);
-      box-shadow: -1px 1px 4px rgba(0, 0, 0, 0.3);
-      touch-action: none;
-    }
-
-    .recording-pull-tab ha-icon {
-      --mdc-icon-size: 24px;
-    }
-
-    .recording-date-selector {
-      display: grid;
-      gap: 6px;
-      font-size: 12px;
-    }
-
-    .recording-date-selector span {
-      color: var(--secondary-text-color, #bdbdbd);
-    }
-
     .recording-datetime {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
       width: 100%;
-      height: 34px;
-      padding: 0 8px;
-      border: 1px solid rgba(255, 255, 255, 0.32);
-      border-radius: 4px;
-      color: white;
+      height: 100%;
+      padding: 0;
+      border: 0;
+      opacity: 0;
       color-scheme: dark;
-      background: rgba(0, 0, 0, 0.18);
-      font: inherit;
-      box-sizing: border-box;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .recording-datetime::-webkit-calendar-picker-indicator {
+      position: absolute;
+      inset: 0;
+      width: auto;
+      height: auto;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
     }
 
     .recording-player {
@@ -1181,6 +1209,13 @@ export class CameraCard extends LitElement {
       --mdc-icon-size: 22px;
     }
 
+    .recording-date-action {
+      position: relative;
+      overflow: hidden;
+      padding: 0;
+      cursor: pointer;
+    }
+
     .player-primary {
       background: var(--primary-color, #03a9f4);
     }
@@ -1199,17 +1234,6 @@ export class CameraCard extends LitElement {
     }
 
     @media (max-width: 600px) {
-      .recording-drawer {
-        right: 46px;
-        width: calc(100% - 58px);
-        padding: 8px;
-      }
-
-      .recording-datetime {
-        height: 32px;
-        font-size: 12px;
-      }
-
       .recording-player {
         right: 6px;
         bottom: 6px;
@@ -1220,10 +1244,6 @@ export class CameraCard extends LitElement {
       .recording-timeline,
       .recording-player-actions {
         gap: 4px;
-      }
-
-      .recording-date {
-        display: none;
       }
 
       .recording-timeline time {

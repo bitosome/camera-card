@@ -6,6 +6,17 @@ export interface HomeAssistantState {
 
 export interface HomeAssistant {
   states: Record<string, HomeAssistantState>;
+  config?: {
+    time_zone?: string;
+    [key: string]: unknown;
+  };
+  locale?: {
+    language?: string;
+    time_format?: 'language' | 'system' | '12' | '24';
+    date_format?: 'language' | 'system' | 'DMY' | 'MDY' | 'YMD';
+    time_zone?: 'local' | 'server';
+  };
+  language?: string;
   callWS<T>(message: Record<string, unknown>): Promise<T>;
   callService(
     domain: string,
