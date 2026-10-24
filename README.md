@@ -3,6 +3,10 @@
 A small Home Assistant dashboard card for live camera streams, UniFi Protect
 recordings, and PTZ presets.
 
+![Illustrated camera layout](docs/camera-layout.svg)
+
+Illustration of the live view and controls; no private camera footage.
+
 ## Features
 
 - Main and HD Home Assistant camera streams.
