@@ -47,6 +47,31 @@ For every camera, choose:
 
 Drag camera rows or use the arrow buttons to change navigation order.
 
+**Live playback** defaults to **Automatic (Home Assistant)**, preserving HA's
+native WebRTC/HLS selection. **WebRTC only (skip HLS)** uses HA's native WebRTC
+player without opening an HLS stream. Choose it when WebRTC works but HA's HLS
+worker fails, such as the RTSPS opening failures observed with HA 2026.10.0.
+
+```yaml
+focused:
+  live_transport: webrtc
+```
+
+WebRTC-only requires a stream-enabled entity, an HA WebRTC provider, and a browser
+that supports the camera's codec. It deliberately does not fall back to HLS or
+snapshots. Native playback errors remain visible; the reconnect button retries
+the selected stream. HD/main selection, recordings, and PTZ controls are unchanged.
+
+An unavailable entity with streaming support may still have a working WebRTC
+path. In this mode the card attempts playback and shows an HA availability warning
+only until the player reports video. Working video has no status text overlay;
+native playback errors remain visible. It never changes or fabricates the entity
+state. Restored entities and
+unavailable entities without streaming support stay unavailable. This is a
+playback workaround, not a repair of HA's HLS worker or of offline cameras.
+Other HLS clients, stream preloading, camera recording services, or incompatible
+browsers can still be affected by the underlying backend problem.
+
 ### Overlay controls
 
 The HD, recording, and fullscreen controls each provide:

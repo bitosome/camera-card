@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 
 const DEFAULT_SETTINGS: FocusedSettings = {
+  live_transport: 'auto',
   button_size: 34,
   controls: {
     x: 90,
@@ -138,6 +139,7 @@ export const normalizeFocusedConfig = (config: RawFocusedConfig): FocusedModel =
   return {
     cameras: getCameraPairs(config),
     settings: {
+      live_transport: focused?.live_transport === 'webrtc' ? 'webrtc' : 'auto',
       button_size: asNumber(focused?.button_size, DEFAULT_SETTINGS.button_size, 24, 80),
       controls: {
         x: asPosition(asRecord(focused?.controls)?.x, 90),

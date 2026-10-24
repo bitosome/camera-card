@@ -6,6 +6,15 @@ import {
 } from '../../src/focused/config';
 
 describe('focused configuration', () => {
+  it('defaults to Automatic and round-trips explicit WebRTC-only playback', () => {
+    expect(createDefaultModel('camera.main').settings.live_transport).toBe('auto');
+    const model = normalizeFocusedConfig({ focused: { live_transport: 'webrtc' } });
+    expect(serializeFocusedConfig(model).focused?.live_transport).toBe('webrtc');
+    expect(
+      normalizeFocusedConfig({ focused: { live_transport: 'bad' as 'auto' } }).settings
+        .live_transport,
+    ).toBe('auto');
+  });
   it('reads main and HD cameras as one pair', () => {
     const model = normalizeFocusedConfig({
       type: 'custom:camera-card',

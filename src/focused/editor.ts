@@ -353,6 +353,33 @@ export class CameraCardEditor extends LitElement {
   private _renderCameras(): TemplateResult {
     return html`<section>
       <h3>Camera streams</h3>
+      ${this._form(
+        { live_transport: this._model.settings.live_transport },
+        [
+          {
+            name: 'live_transport',
+            selector: {
+              select: {
+                mode: 'dropdown',
+                options: [
+                  { value: 'auto', label: 'Automatic (Home Assistant)' },
+                  { value: 'webrtc', label: 'WebRTC only (skip HLS)' },
+                ],
+              },
+            },
+          },
+        ],
+        { live_transport: 'Live playback' },
+        (value) =>
+          this._mutate((model) => {
+            model.settings.live_transport =
+              value.live_transport === 'webrtc' ? 'webrtc' : 'auto';
+          }),
+        {
+          live_transport:
+            'WebRTC only requires a compatible camera and browser. It does not fall back to HLS or snapshots, or change camera availability.',
+        },
+      )}
       <p class="helper">
         Add one main stream and an optional HD stream for each camera. Drag rows or use
         the arrow buttons to set the camera navigation order.

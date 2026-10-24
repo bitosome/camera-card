@@ -61,6 +61,7 @@ export interface FocusedPresetGroup {
 }
 
 export interface FocusedSettings {
+  live_transport: 'auto' | 'webrtc';
   button_size: number;
   controls: FocusedControlGroup;
   substream: FocusedOverlayButton;
@@ -88,6 +89,7 @@ export interface RawFocusedCamera {
 }
 
 export interface RawFocusedSettings {
+  live_transport?: 'auto' | 'webrtc';
   button_size?: number;
   controls?: Partial<FocusedControlGroup>;
   substream?: Partial<FocusedOverlayButton>;

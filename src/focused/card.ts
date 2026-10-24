@@ -1,6 +1,7 @@
 import { css, html, LitElement, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
+import { keyed } from 'lit/directives/keyed.js';
 import screenfull from 'screenfull';
 import { createDefaultModel, normalizeFocusedConfig } from './config.js';
 import type {
@@ -331,6 +332,17 @@ export class CameraCard extends LitElement {
   private _hd = false;
 
   @state()
+  private _liveAttempt = 0;
+
+  @state()
+  private _livePlayback?: {
+    player: HTMLElement;
+    entity: string;
+    attempt: number;
+    hasVideo: boolean;
+  };
+
+  @state()
   private _elementsReady = Boolean(customElements.get('ha-camera-stream'));
 
   @state()
@@ -438,6 +450,7 @@ export class CameraCard extends LitElement {
   }
 
   public disconnectedCallback(): void {
+    this._livePlayback = undefined;
     if (screenfull.isEnabled) {
       screenfull.off('change', this._fullscreenChanged);
     }
@@ -1109,6 +1122,18 @@ export class CameraCard extends LitElement {
 
     const entity = this._activeEntity(pair);
     const stateObj = this.hass.states[entity];
+    const webRTC = model.settings.live_transport === 'webrtc';
+    const liveAttempt = this._liveAttempt;
+    const hasLiveVideo =
+      this._livePlayback?.entity === entity &&
+      this._livePlayback.attempt === liveAttempt &&
+      this._livePlayback.player.isConnected &&
+      this._livePlayback.hasVideo;
+    const canAttemptWebRTC =
+      webRTC &&
+      stateObj &&
+      stateObj.attributes.restored !== true &&
+      (Number(stateObj.attributes.supported_features) & 2) !== 0;
     const presetGroup = model.settings.preset_groups.find(
       (group) => group.camera === pair.main,
     );
@@ -1148,14 +1173,63 @@ export class CameraCard extends LitElement {
             ? html`<div class="message">Loading camera stream…</div>`
             : !stateObj
               ? html`<div class="message">Camera entity not found: ${entity}</div>`
-              : stateObj.state === 'unavailable'
-                ? html`<div class="message">${pair.title} is unavailable</div>`
-                : html`<ha-camera-stream
-                    .hass=${this.hass}
-                    .stateObj=${stateObj}
-                    .controls=${false}
-                    .muted=${true}
-                  ></ha-camera-stream>`}
+              : canAttemptWebRTC
+                ? html`${keyed(
+                      `${entity}:webrtc:${this._liveAttempt}`,
+                      html`
+                        <ha-web-rtc-player
+                          .hass=${this.hass}
+                          .entityid=${entity}
+                          .controls=${false}
+                          .muted=${true}
+                          @streams=${(event: CustomEvent<{ hasVideo: boolean }>) => {
+                            if (
+                              event.currentTarget !==
+                              this.shadowRoot?.querySelector('ha-web-rtc-player')
+                            ) {
+                              return;
+                            }
+                            this._livePlayback = {
+                              player: event.currentTarget as HTMLElement,
+                              entity,
+                              attempt: liveAttempt,
+                              hasVideo: event.detail.hasVideo === true,
+                            };
+                          }}
+                          autoplay
+                          playsinline
+                        ></ha-web-rtc-player>
+                      `,
+                    )}
+                    ${!hasLiveVideo &&
+                    (stateObj.state === 'unavailable' || stateObj.state === 'unknown')
+                      ? html`<div class="availability-warning" role="status">
+                          Home Assistant reports ${stateObj.state}. Live playback is
+                          independent.
+                        </div>`
+                      : nothing}
+                    <button
+                      class="reconnect"
+                      aria-label="Reconnect live stream"
+                      title="Reconnect live stream"
+                      @click=${() => this._liveAttempt++}
+                    >
+                      <ha-icon icon="mdi:refresh"></ha-icon>
+                    </button>`
+                : stateObj.state === 'unavailable' ||
+                    stateObj.attributes.restored === true
+                  ? html`<div class="message">${pair.title} is unavailable</div>`
+                  : webRTC
+                    ? html`<div class="message">
+                        This entity does not advertise live streaming. Select Automatic
+                        playback or a stream-enabled camera.
+                      </div>`
+                    : html`<ha-camera-stream
+                        .hass=${this.hass}
+                        .stateObj=${stateObj}
+                        .controls=${false}
+                        .muted=${true}
+                      ></ha-camera-stream>`}
         ${this._recordingMode && this._recordingLoading
           ? html`<div class="message recording-loading">Loading recording…</div>`
           : nothing}
@@ -1234,10 +1308,34 @@ export class CameraCard extends LitElement {
       aspect-ratio: auto;
     }
 
-    ha-camera-stream {
+    ha-camera-stream,
+    ha-web-rtc-player {
       display: block;
       width: 100%;
       height: 100%;
+    }
+
+    .availability-warning {
+      position: absolute;
+      left: 8px;
+      bottom: 8px;
+      max-width: calc(100% - 68px);
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #ffd180;
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .reconnect {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 40px;
+      height: 40px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.6);
     }
 
     .recording-video {
