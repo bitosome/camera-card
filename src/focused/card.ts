@@ -1144,7 +1144,11 @@ export class CameraCard extends LitElement {
     );
 
     return html`<ha-card>
-      <div class="camera ${this._fullscreen ? 'fullscreen' : ''}">
+      <div
+        class="camera ${this._recordingMode ? 'recording-mode' : ''} ${this._fullscreen
+          ? 'fullscreen'
+          : ''}"
+      >
         ${this._recordingMode
           ? this._recordingUrl
             ? html`<video
@@ -1285,6 +1289,9 @@ export class CameraCard extends LitElement {
     css`
       :host {
         display: block;
+        min-width: 0;
+        width: 100%;
+        container-type: inline-size;
       }
 
       :host([data-fullscreen-fallback]) {
@@ -1304,13 +1311,25 @@ export class CameraCard extends LitElement {
 
       .camera {
         position: relative;
+        container-type: inline-size;
         aspect-ratio: 16 / 9;
         overflow: hidden;
         background: black;
         color: white;
       }
 
+      /* Keep playback controls in flow: narrow toolbars and long recording
+       * notices must never overlap the top controls or leave the media surface. */
+      .camera.recording-mode {
+        height: auto;
+        display: grid;
+        grid-template-rows: minmax(64px, 1fr) auto;
+        aspect-ratio: auto;
+        min-height: max(280px, 56.25cqw);
+      }
+
       .camera.fullscreen {
+        min-height: 0;
         width: 100vw;
         height: 100dvh;
         aspect-ratio: auto;
@@ -1347,6 +1366,8 @@ export class CameraCard extends LitElement {
       }
 
       .recording-video {
+        position: absolute;
+        inset: 0;
         display: block;
         width: 100%;
         height: 100%;
@@ -1497,10 +1518,14 @@ export class CameraCard extends LitElement {
       }
 
       .recording-player {
-        position: absolute;
-        right: 8px;
-        bottom: 8px;
-        left: 8px;
+        position: relative;
+        grid-row: 2;
+        align-self: end;
+        min-width: 0;
+        max-height: calc(100dvh - 80px);
+        margin: 8px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
         z-index: 3;
         display: grid;
         gap: 4px;
@@ -1519,19 +1544,32 @@ export class CameraCard extends LitElement {
         font-size: 12px;
       }
 
+      .recording-notice span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
       .recording-timeline,
       .recording-player-actions {
-        display: flex;
+        display: grid;
         min-width: 0;
         align-items: center;
         gap: 6px;
+      }
+
+      .recording-timeline {
+        grid-template-columns: minmax(60px, 1fr) auto auto;
+      }
+
+      .recording-player-actions {
+        grid-template-columns: repeat(8, minmax(44px, 1fr));
       }
 
       .recording-range {
         position: relative;
         display: flex;
         min-width: 60px;
-        height: 24px;
+        height: 44px;
         flex: 1;
         align-items: center;
       }
@@ -1567,7 +1605,7 @@ export class CameraCard extends LitElement {
         position: absolute;
         inset: 0;
         width: 100%;
-        height: 24px;
+        height: 44px;
         margin: 0;
         appearance: none;
         background: transparent;
@@ -1612,13 +1650,16 @@ export class CameraCard extends LitElement {
 
       .recording-timeline time {
         display: flex;
-        min-width: max-content;
-        gap: 4px;
+        min-width: 0;
+        max-width: 140px;
+        flex-wrap: wrap;
+        gap: 2px 4px;
         font-size: 12px;
         font-variant-numeric: tabular-nums;
       }
 
       .recording-speed {
+        min-width: 44px;
         min-height: 44px;
         padding: 0 4px;
         border: 0;
@@ -1633,6 +1674,8 @@ export class CameraCard extends LitElement {
       .player-action,
       .live-action {
         display: inline-flex;
+        box-sizing: border-box;
+        width: 100%;
         min-width: 44px;
         min-height: 44px;
         align-items: center;
@@ -1653,6 +1696,11 @@ export class CameraCard extends LitElement {
         cursor: pointer;
       }
 
+      .recording-date-action:focus-within {
+        outline: 3px solid var(--primary-color);
+        outline-offset: -3px;
+      }
+
       .player-primary {
         background: var(--primary-color, #03a9f4);
       }
@@ -1664,7 +1712,6 @@ export class CameraCard extends LitElement {
 
       .live-action {
         gap: 6px;
-        margin-left: auto;
         font-weight: 600;
       }
 
@@ -1683,11 +1730,9 @@ export class CameraCard extends LitElement {
           transition: none !important;
         }
       }
-      @media (max-width: 600px) {
+      @container (max-width: 480px) {
         .recording-player {
-          right: 6px;
-          bottom: 6px;
-          left: 6px;
+          margin: 6px;
           padding: 5px 6px;
         }
 
@@ -1696,32 +1741,21 @@ export class CameraCard extends LitElement {
           gap: 4px;
         }
 
+        .recording-player-actions {
+          grid-template-columns: repeat(4, minmax(44px, 1fr));
+        }
+
         .recording-timeline time {
           font-size: 11px;
         }
 
         .player-action,
         .live-action {
-          min-width: 44px;
-          min-height: 44px;
           padding: 0 6px;
         }
 
         .live-action {
           font-size: 12px;
-        }
-      }
-
-      @media (max-width: 360px) {
-        .recording-timeline,
-        .recording-player-actions {
-          gap: 2px;
-        }
-
-        .player-action,
-        .live-action {
-          min-width: 30px;
-          padding: 0 4px;
         }
       }
     `,

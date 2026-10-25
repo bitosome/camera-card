@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Camera playback layout regression</title>
+  <style>
+    :root {
+      --primary-color: #c49be2;
+      --primary-text-color: #eee;
+      --secondary-text-color: #ccd;
+      --card-background-color: #303446;
+      color: #eee;
+      background: #20242c;
+      font:
+        14px Arial,
+        sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 8px;
+    }
+    main {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    iframe {
+      height: 540px;
+      border: 0;
+      display: block;
+    }
+    ha-card {
+      display: block;
+    }
+    pre {
+      white-space: pre-wrap;
+    }
+  </style>
+  <main></main>
+  <script type="module">
+    const query = new URLSearchParams(location.search);
+    const main = document.querySelector('main');
+    if (!query.has('case')) {
+      const cases = [
+        { name: '320px', width: 320 },
+        { name: '390px', width: 390 },
+        { name: '480px', width: 480 },
+        { name: '760px', width: 760 },
+        { name: 'Desktop narrow card', width: 760, cardWidth: 320 },
+        { name: 'Long notice', width: 320, notice: true },
+        { name: 'Landscape fullscreen', width: 760, height: 240, fullscreen: true },
+      ];
+      const results = new Map();
+      for (const item of cases) {
+        const section = document.createElement('section');
+        const heading = document.createElement('h2');
+        heading.textContent = item.name;
+        const frame = document.createElement('iframe');
+        frame.title = item.name;
+        frame.width = String(item.width);
+        if (item.height) frame.style.height = `${item.height}px`;
+        const params = new URLSearchParams({ case: item.name });
+        if (item.cardWidth) params.set('cardWidth', String(item.cardWidth));
+        if (item.notice) params.set('notice', 'true');
+        if (item.fullscreen) params.set('fullscreen', 'true');
+        frame.src = `${location.pathname}?${params}`;
+        section.append(heading, frame);
+        main.append(section);
+      }
+      const result = document.createElement('pre');
+      result.setAttribute('role', 'status');
+      document.body.prepend(result);
+      addEventListener('message', (event) => {
+        if (
+          event.origin !== location.origin ||
+          event.data?.type !== 'playback-layout-result'
+        )
+          return;
+        results.set(event.data.name, event.data.errors);
+        result.textContent = [...results]
+          .map(
+            ([name, errors]) =>
+              `${errors.length ? 'FAIL' : 'PASS'} ${name}${errors.length ? ': ' + errors.join('; ') : ''}`,
+          )
+          .join('\n');
+        result.dataset.passed = String(
+          results.size === cases.length &&
+            [...results.values()].every((errors) => errors.length === 0),
+        );
+      });
+    } else {
+      customElements.define('ha-camera-stream', class extends HTMLElement {});
+      customElements.define(
+        'ha-icon',
+        class extends HTMLElement {
+          connectedCallback() {
+            this.style.cssText =
+              'display:inline-grid;place-items:center;width:24px;height:24px';
+            this.textContent = '●';
+          }
+        },
+      );
+      await import('../../dist/camera-card.js');
+      const card = document.createElement('camera-card');
+      if (query.has('cardWidth')) card.style.width = `${query.get('cardWidth')}px`;
+      card.hass = {
+        states: { 'camera.test': { state: 'streaming', attributes: {} } },
+        locale: { language: 'en-GB', time_format: '24', date_format: 'DMY' },
+        config: { time_zone: 'UTC' },
+        callWS: async () => ({}),
+        callService: async () => {},
+      };
+      card.setConfig({
+        type: 'custom:camera-card',
+        cameras: [{ camera_entity: 'camera.test' }],
+      });
+      // Deterministic mock playback state; this fixture has no Home Assistant connection.
+      card._recordingMode = true;
+      card._fullscreen = query.has('fullscreen');
+      card._recordingDayStart = Date.now() - 86_400_000;
+      card._recordingDayEnd = Date.now();
+      card._recordingPosition = Date.now() - 600_000;
+      card._recordingDateDraft = '2026-10-25';
+      if (query.has('notice'))
+        card._recordingNotice =
+          'This recording includes an unavailable interval. Playback resumes at the nearest available recording. '.repeat(
+            12,
+          );
+      main.append(card);
+      await card.updateComplete;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      const root = card.shadowRoot;
+      const errors = [];
+      const camera = root.querySelector('.camera').getBoundingClientRect();
+      const player = root.querySelector('.recording-player');
+      const rect = player.getBoundingClientRect();
+      if (player.scrollWidth > player.clientWidth)
+        errors.push('toolbar overflows horizontally');
+      if (rect.top < camera.top || rect.bottom > camera.bottom + 1)
+        errors.push('toolbar outside camera');
+      const controls = [
+        ...root.querySelectorAll(
+          '.recording-player button,.recording-player input,.recording-player select',
+        ),
+      ];
+      for (const control of controls) {
+        const box = control.getBoundingClientRect();
+        if (box.width < 44 || box.height < 44)
+          errors.push(`${control.getAttribute('aria-label')}: target below 44px`);
+        if (box.left < camera.left || box.right > camera.right + 1)
+          errors.push(`${control.getAttribute('aria-label')}: clipped horizontally`);
+      }
+      const actions = [...root.querySelector('.recording-player-actions').children];
+      const tops = new Set(actions.map((action) => action.getBoundingClientRect().top));
+      if (camera.width <= 480 && tops.size !== 2)
+        errors.push('narrow toolbar should have two rows');
+      for (const control of root.querySelectorAll('.overlay-button')) {
+        if (control.getBoundingClientRect().bottom > rect.top)
+          errors.push('toolbar covers top action');
+      }
+      const result = document.createElement('pre');
+      result.textContent = errors.length ? errors.join('\n') : 'PASS';
+      document.body.append(result);
+      parent.postMessage(
+        { type: 'playback-layout-result', name: query.get('case'), errors },
+        location.origin,
+      );
+    }
+  </script>
+</html>

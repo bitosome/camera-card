@@ -253,6 +253,10 @@ describe('focused card', () => {
       ),
     );
     expect(card.shadowRoot?.querySelector('video')?.controls).toBe(false);
+    expect(card.shadowRoot?.querySelector('.camera.recording-mode')).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelectorAll('.recording-player-actions > *'),
+    ).toHaveLength(8);
     expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);
     expect(
       card.shadowRoot?.querySelector('[aria-label="Recording playback time"]'),
@@ -333,6 +337,12 @@ describe('focused card', () => {
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('.recording-gap')).not.toBeNull();
     expect(card.shadowRoot?.querySelector('.recording-notice')).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelectorAll('.recording-player-actions > *'),
+    ).toHaveLength(8);
+    expect(
+      card.shadowRoot?.querySelector<HTMLButtonElement>('.live-action')?.disabled,
+    ).toBe(false);
     expect(card.shadowRoot?.querySelector('.error')).toBeNull();
     card.shadowRoot
       ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss recording message"]')

@@ -211,3 +211,13 @@ MDI dismissal, keyboard focus and reduced motion with the card family. Camera
 and playback controls have at least 44px touch targets; configured button sizes
 are clamped to that accessible minimum. Video remains a high-contrast media
 surface, with its existing streaming and recording semantics unchanged.
+
+Version 1.5.3 keeps recording controls in two rows on narrow cards and leaves
+all playback actions reachable at 320px, including Return to live. The timeline
+and date picker retain 44px targets, and long recording notices scroll without
+covering the top controls. Live video sizing is unchanged.
+
+For the responsive playback regression fixture, build the card, serve the
+repository locally, and open `tests/fixtures/focused-playback.html`. It checks
+320px, 390px, 480px and 760px cards, a narrow card in a desktop viewport, and a
+long notice and landscape fullscreen for clipping, overlap and undersized controls.
