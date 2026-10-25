@@ -1,11 +1,6 @@
 {
-  "source": "bitosome/space-hub-card",
+  "package": "@bitosome/ha-card-ui",
   "version": "1.0.0",
-  "source_commit": "5ecc8d8da6cc85c7ae18ed96cefbbf1dcbbe233f",
-  "license": "MIT",
-  "files": {
-    "design-tokens.ts": "0a30526d88a72331c34fc24e552d0aab43a62fc117150afed7b7c692782beb0b",
-    "card-primitives.ts": "4c38213dbfc3b0ea646c5fb91986ac4a012637382146dee3dbf28e6bf87c4188"
-  },
-  "method": "Build-time vendoring; update in Space Hub, then run scripts/sync-card-design.mjs."
+  "source": "https://github.com/bitosome/ha-card-ui",
+  "distribution": "build-time dependency; no vendored implementation"
 }
