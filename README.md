@@ -202,3 +202,12 @@ focused:
 ## License
 
 [MIT](LICENSE)
+
+## Shared presentation
+
+The focused camera UI vendors Space Hub's versioned card design primitives and
+tokens (`src/shared/DESIGN_PROVENANCE.json`). Version 1.5.2 aligns button shapes,
+MDI dismissal, keyboard focus and reduced motion with the card family. Camera
+and playback controls have at least 44px touch targets; configured button sizes
+are clamped to that accessible minimum. Video remains a high-contrast media
+surface, with its existing streaming and recording semantics unchanged.

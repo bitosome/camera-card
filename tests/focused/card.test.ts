@@ -77,13 +77,13 @@ describe('focused card', () => {
 
   it('moves an entire button row inside the camera without changing its spacing', () => {
     expect(groupedButtonLeft(90, 10, 3, 0, 34)).toBe(
-      'calc(clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%)) - 10%)',
+      'calc(clamp(calc(17px + max(10%, 38px)), 90%, calc(100% - 17px - max(10%, 38px))) - max(10%, 38px))',
     );
     expect(groupedButtonLeft(90, 10, 3, 1, 34)).toBe(
-      'clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%))',
+      'clamp(calc(17px + max(10%, 38px)), 90%, calc(100% - 17px - max(10%, 38px)))',
     );
     expect(groupedButtonLeft(90, 10, 3, 2, 34)).toBe(
-      'calc(clamp(calc(17px + 10%), 90%, calc(100% - 17px - 10%)) + 10%)',
+      'calc(clamp(calc(17px + max(10%, 38px)), 90%, calc(100% - 17px - max(10%, 38px))) + max(10%, 38px))',
     );
   });
 

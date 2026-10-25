@@ -1,6 +1,8 @@
 import { css, html, LitElement, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
+import { familyStyles, UI_ICONS } from '../shared/card-primitives.js';
+import { designTokens } from '../shared/design-tokens.js';
 import { keyed } from 'lit/directives/keyed.js';
 import screenfull from 'screenfull';
 import { createDefaultModel, normalizeFocusedConfig } from './config.js';
@@ -283,12 +285,15 @@ export const groupedButtonLeft = (
 ): string => {
   const spacing = count > 1 ? Math.min(requestedSpacing, 80 / (count - 1)) : 0;
   const halfSpan = ((count - 1) * spacing) / 2;
-  const safeCenter = `clamp(calc(${size / 2}px + ${halfSpan}%), ${center}%, calc(100% - ${size / 2}px - ${halfSpan}%))`;
-  const offset = (index - (count - 1) / 2) * spacing;
-  if (offset === 0) {
+  const pixelHalfSpan = ((count - 1) * (size + 4)) / 2;
+  const span = `max(${halfSpan}%, ${pixelHalfSpan}px)`;
+  const safeCenter = `clamp(calc(${size / 2}px + ${span}), ${center}%, calc(100% - ${size / 2}px - ${span}))`;
+  const position = index - (count - 1) / 2;
+  const offset = position * spacing;
+  if (position === 0) {
     return safeCenter;
   }
-  return `calc(${safeCenter} ${offset < 0 ? '-' : '+'} ${Math.abs(offset)}%)`;
+  return `calc(${safeCenter} ${position < 0 ? '-' : '+'} max(${Math.abs(offset)}%, ${Math.abs(position) * (size + 4)}px))`;
 };
 
 export const resolvePercentage = (value: FocusedPosition, fallback: number): number => {
@@ -303,7 +308,7 @@ const buttonStyle = (button: PositionedOverlayButton, size: number) => ({
   top: `clamp(${size / 2}px, ${button.y}%, calc(100% - ${size / 2}px))`,
   width: `${size}px`,
   height: `${size}px`,
-  '--focused-icon-size': `${Math.round(size * 0.65)}px`,
+  '--focused-icon-size': `${Math.min(28, Math.round(size * 0.55))}px`,
 });
 
 export const callUniFiPreset = async (
@@ -951,7 +956,7 @@ export class CameraCard extends LitElement {
               aria-label="Dismiss recording message"
               @click=${() => (this._recordingNotice = '')}
             >
-              <ha-icon icon="mdi:close"></ha-icon>
+              <ha-icon icon=${UI_ICONS.close}></ha-icon>
             </button>
           </div>`
         : nothing}
@@ -1266,7 +1271,7 @@ export class CameraCard extends LitElement {
                 aria-label="Dismiss error"
                 @click=${() => (this._error = '')}
               >
-                <ha-icon icon="mdi:close"></ha-icon>
+                <ha-icon icon=${UI_ICONS.close}></ha-icon>
               </button>
             </div>`
           : nothing}
@@ -1274,433 +1279,453 @@ export class CameraCard extends LitElement {
     </ha-card>`;
   }
 
-  static styles = css`
-    :host {
-      display: block;
-    }
+  static styles = [
+    designTokens,
+    familyStyles,
+    css`
+      :host {
+        display: block;
+      }
 
-    :host([data-fullscreen-fallback]) {
-      position: fixed;
-      inset: 0;
-      z-index: 10000;
-      width: 100vw;
-      height: 100dvh;
-      background: black;
-    }
+      :host([data-fullscreen-fallback]) {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        width: 100vw;
+        height: 100dvh;
+        background: black;
+      }
 
-    ha-card,
-    .camera {
-      width: 100%;
-      height: 100%;
-    }
+      ha-card,
+      .camera {
+        width: 100%;
+        height: 100%;
+      }
 
-    .camera {
-      position: relative;
-      aspect-ratio: 16 / 9;
-      overflow: hidden;
-      background: black;
-      color: white;
-    }
+      .camera {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        background: black;
+        color: white;
+      }
 
-    .camera.fullscreen {
-      width: 100vw;
-      height: 100dvh;
-      aspect-ratio: auto;
-    }
+      .camera.fullscreen {
+        width: 100vw;
+        height: 100dvh;
+        aspect-ratio: auto;
+      }
 
-    ha-camera-stream,
-    ha-web-rtc-player {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
+      ha-camera-stream,
+      ha-web-rtc-player {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
 
-    .availability-warning {
-      position: absolute;
-      left: 8px;
-      bottom: 8px;
-      max-width: calc(100% - 68px);
-      padding: 6px 8px;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.8);
-      color: #ffd180;
-      font-size: 12px;
-      pointer-events: none;
-    }
+      .availability-warning {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        max-width: calc(100% - 68px);
+        padding: 6px 8px;
+        border-radius: var(--tile-border-radius, 12px);
+        background: rgba(0, 0, 0, 0.8);
+        color: #ffd180;
+        font-size: 12px;
+        pointer-events: none;
+      }
 
-    .reconnect {
-      position: absolute;
-      right: 8px;
-      bottom: 8px;
-      width: 40px;
-      height: 40px;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.6);
-    }
+      .reconnect {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        width: 44px;
+        height: 44px;
+        border-radius: var(--tile-border-radius, 12px);
+        background: rgba(0, 0, 0, 0.6);
+      }
 
-    .recording-video {
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: black;
-    }
+      .recording-video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: black;
+      }
 
-    .message {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      color: var(--secondary-text-color, #bdbdbd);
-      text-align: center;
-    }
+      .message {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: var(--secondary-text-color, #bdbdbd);
+        text-align: center;
+      }
 
-    .recording-loading {
-      z-index: 1;
-      pointer-events: none;
-    }
+      .recording-loading {
+        z-index: 1;
+        pointer-events: none;
+      }
 
-    button {
-      border: 0;
-      color: white;
-      cursor: pointer;
-    }
+      button {
+        font: inherit;
+        touch-action: manipulation;
+        border: 0;
+        color: white;
+        cursor: pointer;
+      }
 
-    .overlay-button {
-      position: absolute;
-      z-index: 3;
-      display: grid;
-      place-items: center;
-      padding: 0;
-      transform: translate(-50%, -50%);
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.42);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-      backdrop-filter: blur(4px);
-    }
+      button:focus-visible,
+      select:focus-visible,
+      input:focus-visible {
+        outline: 3px solid var(--primary-color);
+        outline-offset: -3px;
+      }
+      .overlay-button {
+        position: absolute;
+        z-index: 3;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        transform: translate(-50%, -50%);
+        border-radius: var(--tile-border-radius, 12px);
+        background: rgba(0, 0, 0, 0.42);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(4px);
+      }
 
-    .overlay-button:hover,
-    .overlay-button:focus-visible,
-    .overlay-button.active {
-      background: var(--primary-color, #03a9f4);
-    }
+      .overlay-button:hover,
+      .overlay-button:focus-visible,
+      .overlay-button.active {
+        background: var(--primary-color, #03a9f4);
+      }
 
-    .overlay-button ha-icon {
-      --mdc-icon-size: var(--focused-icon-size);
-    }
+      .overlay-button ha-icon {
+        --mdc-icon-size: var(--focused-icon-size);
+      }
 
-    .navigation {
-      position: absolute;
-      top: 50%;
-      z-index: 2;
-      display: grid;
-      width: 44px;
-      height: 44px;
-      place-items: center;
-      padding: 0;
-      transform: translateY(-50%);
-      border-radius: 50%;
-      background: rgba(0, 0, 0, 0.25);
-    }
+      .navigation {
+        position: absolute;
+        top: 50%;
+        z-index: 2;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        padding: 0;
+        transform: translateY(-50%);
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.25);
+      }
 
-    .navigation:hover,
-    .navigation:focus-visible {
-      background: rgba(0, 0, 0, 0.55);
-    }
+      .navigation:hover,
+      .navigation:focus-visible {
+        background: rgba(0, 0, 0, 0.55);
+      }
 
-    .navigation.previous {
-      left: 8px;
-    }
+      .navigation.previous {
+        left: 8px;
+      }
 
-    .navigation.next {
-      right: 8px;
-    }
+      .navigation.next {
+        right: 8px;
+      }
 
-    .navigation ha-icon {
-      --mdc-icon-size: 32px;
-    }
+      .navigation ha-icon {
+        --mdc-icon-size: 32px;
+      }
 
-    .error {
-      position: absolute;
-      right: 8px;
-      bottom: 8px;
-      z-index: 4;
-      max-width: calc(100% - 16px);
-      padding: 6px 10px;
-      border-radius: 4px;
-      background: var(--error-color, #db4437);
-      font-size: 12px;
-    }
+      .error {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        z-index: 4;
+        max-width: calc(100% - 16px);
+        padding: 6px 10px;
+        border-radius: var(--tile-border-radius, 12px);
+        background: var(--error-color, #db4437);
+        font-size: 12px;
+      }
 
-    .error,
-    .recording-notice {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+      .error,
+      .recording-notice {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
 
-    .error button,
-    .recording-notice button {
-      display: grid;
-      width: 24px;
-      height: 24px;
-      flex: 0 0 auto;
-      place-items: center;
-      padding: 0;
-      background: transparent;
-    }
+      .error button,
+      .recording-notice button {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        flex: 0 0 auto;
+        place-items: center;
+        padding: 0;
+        background: transparent;
+      }
 
-    .error ha-icon,
-    .recording-notice ha-icon {
-      --mdc-icon-size: 18px;
-    }
+      .error ha-icon,
+      .recording-notice ha-icon {
+        --mdc-icon-size: 18px;
+      }
 
-    .recording-datetime {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      width: 100%;
-      height: 100%;
-      padding: 0;
-      border: 0;
-      opacity: 0;
-      color-scheme: dark;
-      cursor: pointer;
-      font-size: 16px;
-    }
+      .recording-datetime {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        opacity: 0;
+        color-scheme: dark;
+        cursor: pointer;
+        font-size: 16px;
+      }
 
-    .recording-datetime::-webkit-calendar-picker-indicator {
-      position: absolute;
-      inset: 0;
-      width: auto;
-      height: auto;
-      margin: 0;
-      opacity: 0;
-      cursor: pointer;
-    }
+      .recording-datetime::-webkit-calendar-picker-indicator {
+        position: absolute;
+        inset: 0;
+        width: auto;
+        height: auto;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
 
-    .recording-player {
-      position: absolute;
-      right: 8px;
-      bottom: 8px;
-      left: 8px;
-      z-index: 3;
-      display: grid;
-      gap: 4px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.66);
-      backdrop-filter: blur(6px);
-      box-sizing: border-box;
-    }
-
-    .recording-notice {
-      justify-content: space-between;
-      padding: 4px 6px;
-      border-radius: 4px;
-      background: var(--error-color, #db4437);
-      font-size: 12px;
-    }
-
-    .recording-timeline,
-    .recording-player-actions {
-      display: flex;
-      min-width: 0;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .recording-range {
-      position: relative;
-      display: flex;
-      min-width: 60px;
-      height: 24px;
-      flex: 1;
-      align-items: center;
-    }
-
-    .recording-track {
-      position: absolute;
-      right: 0;
-      left: 0;
-      height: 5px;
-      overflow: hidden;
-      border-radius: 3px;
-      background: linear-gradient(
-        to right,
-        var(--primary-color, #03a9f4) 0 var(--recording-position),
-        rgba(255, 255, 255, 0.38) var(--recording-position) var(--recording-playable),
-        rgba(110, 110, 110, 0.55) var(--recording-playable) 100%
-      );
-    }
-
-    .recording-gap {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      min-width: 2px;
-      background: repeating-linear-gradient(
-        135deg,
-        rgba(65, 65, 65, 0.95) 0 3px,
-        rgba(115, 115, 115, 0.95) 3px 6px
-      );
-    }
-
-    .recording-range input {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 24px;
-      margin: 0;
-      appearance: none;
-      background: transparent;
-      cursor: pointer;
-    }
-
-    .recording-range input::-webkit-slider-runnable-track {
-      height: 5px;
-      background: transparent;
-    }
-
-    .recording-range input::-webkit-slider-thumb {
-      width: 16px;
-      height: 16px;
-      margin-top: -5.5px;
-      appearance: none;
-      border: 0;
-      border-radius: 50%;
-      background: var(--primary-color, #03a9f4);
-    }
-
-    .recording-range input::-moz-range-track {
-      height: 5px;
-      background: transparent;
-    }
-
-    .recording-range input::-moz-range-progress {
-      background: transparent;
-    }
-
-    .recording-range input::-moz-range-thumb {
-      width: 16px;
-      height: 16px;
-      border: 0;
-      border-radius: 50%;
-      background: var(--primary-color, #03a9f4);
-    }
-
-    .recording-range:focus-within .recording-track {
-      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
-    }
-
-    .recording-timeline time {
-      display: flex;
-      min-width: max-content;
-      gap: 4px;
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .recording-speed {
-      height: 28px;
-      padding: 0 4px;
-      border: 0;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.14);
-      color: white;
-      color-scheme: dark;
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .player-action,
-    .live-action {
-      display: inline-flex;
-      min-width: 36px;
-      height: 36px;
-      align-items: center;
-      justify-content: center;
-      padding: 0 8px;
-      border-radius: 5px;
-      background: rgba(255, 255, 255, 0.14);
-    }
-
-    .player-action ha-icon {
-      --mdc-icon-size: 22px;
-    }
-
-    .recording-date-action {
-      position: relative;
-      overflow: hidden;
-      padding: 0;
-      cursor: pointer;
-    }
-
-    .player-primary {
-      background: var(--primary-color, #03a9f4);
-    }
-
-    .player-action:disabled {
-      opacity: 0.35;
-      cursor: default;
-    }
-
-    .live-action {
-      gap: 6px;
-      margin-left: auto;
-      font-weight: 600;
-    }
-
-    .live-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--error-color, #db4437);
-    }
-
-    @media (max-width: 600px) {
       .recording-player {
-        right: 6px;
-        bottom: 6px;
-        left: 6px;
-        padding: 5px 6px;
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        left: 8px;
+        z-index: 3;
+        display: grid;
+        gap: 4px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.66);
+        backdrop-filter: blur(6px);
+        box-sizing: border-box;
+      }
+
+      .recording-notice {
+        justify-content: space-between;
+        padding: 4px 6px;
+        border-radius: var(--tile-border-radius, 12px);
+        background: var(--error-color, #db4437);
+        font-size: 12px;
       }
 
       .recording-timeline,
       .recording-player-actions {
-        gap: 4px;
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .recording-range {
+        position: relative;
+        display: flex;
+        min-width: 60px;
+        height: 24px;
+        flex: 1;
+        align-items: center;
+      }
+
+      .recording-track {
+        position: absolute;
+        right: 0;
+        left: 0;
+        height: 5px;
+        overflow: hidden;
+        border-radius: 3px;
+        background: linear-gradient(
+          to right,
+          var(--primary-color, #03a9f4) 0 var(--recording-position),
+          rgba(255, 255, 255, 0.38) var(--recording-position) var(--recording-playable),
+          rgba(110, 110, 110, 0.55) var(--recording-playable) 100%
+        );
+      }
+
+      .recording-gap {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        min-width: 2px;
+        background: repeating-linear-gradient(
+          135deg,
+          rgba(65, 65, 65, 0.95) 0 3px,
+          rgba(115, 115, 115, 0.95) 3px 6px
+        );
+      }
+
+      .recording-range input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 24px;
+        margin: 0;
+        appearance: none;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .recording-range input::-webkit-slider-runnable-track {
+        height: 5px;
+        background: transparent;
+      }
+
+      .recording-range input::-webkit-slider-thumb {
+        width: 16px;
+        height: 16px;
+        margin-top: -5.5px;
+        appearance: none;
+        border: 0;
+        border-radius: 50%;
+        background: var(--primary-color, #03a9f4);
+      }
+
+      .recording-range input::-moz-range-track {
+        height: 5px;
+        background: transparent;
+      }
+
+      .recording-range input::-moz-range-progress {
+        background: transparent;
+      }
+
+      .recording-range input::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--primary-color, #03a9f4);
+      }
+
+      .recording-range:focus-within .recording-track {
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
       }
 
       .recording-timeline time {
-        font-size: 11px;
-      }
-
-      .player-action,
-      .live-action {
-        min-width: 32px;
-        height: 32px;
-        padding: 0 6px;
-      }
-
-      .live-action {
+        display: flex;
+        min-width: max-content;
+        gap: 4px;
         font-size: 12px;
+        font-variant-numeric: tabular-nums;
       }
-    }
 
-    @media (max-width: 360px) {
-      .recording-timeline,
-      .recording-player-actions {
-        gap: 2px;
+      .recording-speed {
+        min-height: 44px;
+        padding: 0 4px;
+        border: 0;
+        border-radius: var(--tile-border-radius, 12px);
+        background: rgba(255, 255, 255, 0.14);
+        color: white;
+        color-scheme: dark;
+        font: inherit;
+        cursor: pointer;
       }
 
       .player-action,
       .live-action {
-        min-width: 30px;
-        padding: 0 4px;
+        display: inline-flex;
+        min-width: 44px;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 8px;
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.14);
       }
-    }
-  `;
+
+      .player-action ha-icon {
+        --mdc-icon-size: 22px;
+      }
+
+      .recording-date-action {
+        position: relative;
+        overflow: hidden;
+        padding: 0;
+        cursor: pointer;
+      }
+
+      .player-primary {
+        background: var(--primary-color, #03a9f4);
+      }
+
+      .player-action:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      .live-action {
+        gap: 6px;
+        margin-left: auto;
+        font-weight: 600;
+      }
+
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--error-color, #db4437);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+      @media (max-width: 600px) {
+        .recording-player {
+          right: 6px;
+          bottom: 6px;
+          left: 6px;
+          padding: 5px 6px;
+        }
+
+        .recording-timeline,
+        .recording-player-actions {
+          gap: 4px;
+        }
+
+        .recording-timeline time {
+          font-size: 11px;
+        }
+
+        .player-action,
+        .live-action {
+          min-width: 44px;
+          min-height: 44px;
+          padding: 0 6px;
+        }
+
+        .live-action {
+          font-size: 12px;
+        }
+      }
+
+      @media (max-width: 360px) {
+        .recording-timeline,
+        .recording-player-actions {
+          gap: 2px;
+        }
+
+        .player-action,
+        .live-action {
+          min-width: 30px;
+          padding: 0 4px;
+        }
+      }
+    `,
+  ];
 }
 
 window.customCards = window.customCards ?? [];

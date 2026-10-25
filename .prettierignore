@@ -2,3 +2,6 @@ dist
 node_modules
 coverage
 visualizations
+
+# Canonical byte-verified presentation sources
+src/shared/

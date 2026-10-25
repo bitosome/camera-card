@@ -6,6 +6,14 @@ import {
 } from '../../src/focused/config';
 
 describe('focused configuration', () => {
+  it('keeps controls touch accessible while preserving larger configured sizes', () => {
+    expect(
+      normalizeFocusedConfig({ focused: { button_size: 24 } }).settings.button_size,
+    ).toBe(44);
+    expect(
+      normalizeFocusedConfig({ focused: { button_size: 60 } }).settings.button_size,
+    ).toBe(60);
+  });
   it('defaults to Automatic and round-trips explicit WebRTC-only playback', () => {
     expect(createDefaultModel('camera.main').settings.live_transport).toBe('auto');
     const model = normalizeFocusedConfig({ focused: { live_transport: 'webrtc' } });
