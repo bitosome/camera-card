@@ -1,6 +1,6 @@
 {
   "package": "@bitosome/ha-card-ui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "source": "https://github.com/bitosome/ha-card-ui",
   "distribution": "build-time dependency; no vendored implementation"
 }

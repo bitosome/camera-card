@@ -205,7 +205,7 @@ focused:
 
 ## Shared presentation
 
-The focused camera UI bundles the pinned [`@bitosome/ha-card-ui`](https://github.com/bitosome/ha-card-ui) 1.0.0 package. Its `src/shared` paths are compatibility re-exports, not copied implementations. Version 1.5.4 adopts the separate library while preserving media-specific controls. The shared foundation aligns button shapes,
+The focused camera UI bundles the pinned [`@bitosome/ha-card-ui`](https://github.com/bitosome/ha-card-ui) 1.0.1 package. Its `src/shared` paths are compatibility re-exports, not copied implementations. Version 1.5.5 bundles the shared library while preserving media-specific controls. The shared foundation aligns button shapes,
 MDI dismissal, keyboard focus and reduced motion with the card family. Camera
 and playback controls have at least 44px touch targets; configured button sizes
 are clamped to that accessible minimum. Video remains a high-contrast media
