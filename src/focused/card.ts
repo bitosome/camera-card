@@ -410,7 +410,11 @@ export class CameraCard extends LitElement {
       .map((t) => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }));
   }
   private _touchStart(event: TouchEvent): void {
-    if (!this._fullscreen) return;
+    if (
+      !this._fullscreen ||
+      event.composedPath().some((el) => el instanceof HTMLButtonElement)
+    )
+      return;
     const points = this._touchPoints(event);
     if (points.length === 2 || this._zoom.scale > 1) {
       event.preventDefault();
@@ -435,6 +439,7 @@ export class CameraCard extends LitElement {
     if (event.touches.length) this._touchStart(event);
   }
   private _videoClick(event: Event): void {
+    if (event.composedPath().some((el) => el instanceof HTMLButtonElement)) return;
     if (this._suppressVideoClick) {
       event.preventDefault();
       event.stopPropagation();
@@ -1300,8 +1305,6 @@ export class CameraCard extends LitElement {
               ? html`<div class="message recording-loading">Loading recording…</div>`
               : nothing}
           </div>
-        </div>
-        <div class="view-controls">
           ${model.cameras.length > 1
             ? html`
                 <button
@@ -1322,6 +1325,8 @@ export class CameraCard extends LitElement {
                 </button>
               `
             : nothing}
+        </div>
+        <div class="view-controls">
           ${this._renderControls(pair, model)}
           ${this._fullscreen && this._zoom.scale > 1
             ? html`<button
