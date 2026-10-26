@@ -1459,7 +1459,7 @@ export class CameraCard extends LitElement {
       @container (max-width: 600px) {
         .preset-row {
           position: absolute;
-          bottom: max(8px, env(safe-area-inset-bottom, 0px));
+          bottom: 8px;
           left: 8px;
           right: 8px;
           display: flex;
@@ -1477,7 +1477,7 @@ export class CameraCard extends LitElement {
         }
         .view-controls {
           position: absolute;
-          top: max(8px, env(safe-area-inset-top, 0px));
+          top: 8px;
           left: 8px;
           right: 8px;
           display: flex;
@@ -1489,6 +1489,18 @@ export class CameraCard extends LitElement {
           position: static;
           transform: none;
           flex: 0 0 auto;
+        }
+      }
+
+      /* Embedded cards already sit inside HA's safe area. Only fullscreen
+         controls need to avoid the device notch and home indicator. */
+      .fullscreen:not(.recording-mode) .view-controls,
+      .fullscreen .zoom-reset {
+        top: max(8px, env(safe-area-inset-top, 0px));
+      }
+      @container (max-width: 600px) {
+        .fullscreen .preset-row {
+          bottom: max(8px, env(safe-area-inset-bottom, 0px));
         }
       }
 
