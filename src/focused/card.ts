@@ -1,3 +1,4 @@
+import { initialZoom, moveZoom, type ZoomPoint } from './zoom.js';
 import { css, html, LitElement, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
@@ -337,13 +338,9 @@ export class CameraCard extends LitElement {
   private _hd = false;
 
   @state()
-  private _liveAttempt = 0;
-
-  @state()
   private _livePlayback?: {
     player: HTMLElement;
     entity: string;
-    attempt: number;
     hasVideo: boolean;
   };
 
@@ -398,6 +395,53 @@ export class CameraCard extends LitElement {
   @state()
   private _unavailableRecordings: Record<string, RecordingRange[]> = {};
 
+  @state() private _zoom = initialZoom();
+  private _gesture?: { points: ZoomPoint[]; zoom: ReturnType<typeof initialZoom> };
+  private _suppressVideoClick = false;
+  private _resetZoom(): void {
+    this._zoom = initialZoom();
+    this._gesture = undefined;
+    this._suppressVideoClick = false;
+  }
+  private _touchPoints(event: TouchEvent): ZoomPoint[] {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return Array.from(event.touches)
+      .slice(0, 2)
+      .map((t) => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }));
+  }
+  private _touchStart(event: TouchEvent): void {
+    if (!this._fullscreen) return;
+    const points = this._touchPoints(event);
+    if (points.length === 2 || this._zoom.scale > 1) {
+      event.preventDefault();
+      this._suppressVideoClick = true;
+      this._gesture = { points, zoom: this._zoom };
+    }
+  }
+  private _touchMove(event: TouchEvent): void {
+    if (!this._fullscreen || !this._gesture) return;
+    event.preventDefault();
+    const el = event.currentTarget as HTMLElement;
+    this._zoom = moveZoom(
+      this._gesture.zoom,
+      this._gesture.points,
+      this._touchPoints(event),
+      el.clientWidth,
+      el.clientHeight,
+    );
+  }
+  private _touchEnd(event: TouchEvent): void {
+    this._gesture = undefined;
+    if (event.touches.length) this._touchStart(event);
+  }
+  private _videoClick(event: Event): void {
+    if (this._suppressVideoClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      this._suppressVideoClick = false;
+    }
+  }
+
   private _loadingElements?: Promise<void>;
   private _documentOverflow = '';
   private _recordingRequest = 0;
@@ -449,6 +493,8 @@ export class CameraCard extends LitElement {
 
   public connectedCallback(): void {
     super.connectedCallback();
+    this._hd = false;
+    this._resetZoom();
     if (screenfull.isEnabled) {
       screenfull.on('change', this._fullscreenChanged);
     }
@@ -466,6 +512,7 @@ export class CameraCard extends LitElement {
 
   private _fullscreenChanged = (): void => {
     this._fullscreen = isFocusedCardFullscreen(screenfull, this);
+    this._resetZoom();
   };
 
   private async _loadHomeAssistantElements(cameraEntity = ''): Promise<void> {
@@ -503,6 +550,7 @@ export class CameraCard extends LitElement {
       return;
     }
     const nextIndex = (this._cameraIndex + offset + count) % count;
+    this._resetZoom();
     this._cameraIndex = nextIndex;
     this._hd = false;
     this._error = '';
@@ -514,6 +562,7 @@ export class CameraCard extends LitElement {
   private _toggleSubstream(): void {
     const pair = this._getModel()?.cameras[this._cameraIndex];
     if (pair?.hd) {
+      this._resetZoom();
       this._hd = !this._hd;
       this._error = '';
     }
@@ -535,6 +584,7 @@ export class CameraCard extends LitElement {
   }
 
   private _toggleRecording(pair: FocusedCameraPair): void {
+    this._resetZoom();
     if (this._recordingMode) {
       this._closeRecording();
       return;
@@ -778,6 +828,7 @@ export class CameraCard extends LitElement {
       this.removeAttribute('data-fullscreen-fallback');
     }
     this._fullscreen = active;
+    this._resetZoom();
     this._error = '';
   }
 
@@ -855,7 +906,7 @@ export class CameraCard extends LitElement {
         ? [
             {
               button: model.settings.substream,
-              label: this._hd ? 'Use main stream' : 'Use HD stream',
+              label: this._hd ? 'Use SD stream' : 'Use HD stream',
               action: () => this._toggleSubstream(),
               active: this._hd,
             },
@@ -1128,10 +1179,8 @@ export class CameraCard extends LitElement {
     const entity = this._activeEntity(pair);
     const stateObj = this.hass.states[entity];
     const webRTC = model.settings.live_transport === 'webrtc';
-    const liveAttempt = this._liveAttempt;
     const hasLiveVideo =
       this._livePlayback?.entity === entity &&
-      this._livePlayback.attempt === liveAttempt &&
       this._livePlayback.player.isConnected &&
       this._livePlayback.hasVideo;
     const canAttemptWebRTC =
@@ -1149,123 +1198,147 @@ export class CameraCard extends LitElement {
           ? 'fullscreen'
           : ''}"
       >
-        ${this._recordingMode
-          ? this._recordingUrl
-            ? html`<video
-                class="recording-video"
-                src=${this._recordingUrl}
-                ?autoplay=${!this._recordingPaused}
-                .muted=${this._recordingMuted}
-                .playbackRate=${this._recordingRate}
-                playsinline
-                aria-label="Recording video"
-                @click=${() => void this._toggleRecordingPlayback()}
-                @canplay=${this._recordingCanPlay}
-                @play=${() => (this._recordingPaused = false)}
-                @pause=${(event: Event) => {
-                  const video = event.currentTarget as HTMLVideoElement;
-                  if (!this._recordingLoading && !video.ended) {
-                    this._recordingPaused = true;
-                  }
-                }}
-                @timeupdate=${this._recordingTimeUpdate}
-                @ended=${() => this._advanceRecording(pair.main)}
-                @error=${() => {
-                  this._recordingLoading = false;
-                  this._markRecordingUnavailable(pair.main);
-                  this._recordingNotice =
-                    'Recording could not be played. UniFi Protect media requires Full access mode and available footage.';
-                }}
-              ></video>`
-            : nothing
-          : !this._elementsReady
-            ? html`<div class="message">Loading camera stream…</div>`
-            : !stateObj
-              ? html`<div class="message">Camera entity not found: ${entity}</div>`
-              : canAttemptWebRTC
-                ? html`${keyed(
-                      `${entity}:webrtc:${this._liveAttempt}`,
-                      html`
-                        <ha-web-rtc-player
-                          .hass=${this.hass}
-                          .entityid=${entity}
-                          .controls=${false}
-                          .muted=${true}
-                          @streams=${(event: CustomEvent<{ hasVideo: boolean }>) => {
-                            if (
-                              event.currentTarget !==
-                              this.shadowRoot?.querySelector('ha-web-rtc-player')
-                            ) {
-                              return;
-                            }
-                            this._livePlayback = {
-                              player: event.currentTarget as HTMLElement,
-                              entity,
-                              attempt: liveAttempt,
-                              hasVideo: event.detail.hasVideo === true,
-                            };
-                          }}
-                          autoplay
-                          playsinline
-                        ></ha-web-rtc-player>
-                      `,
-                    )}
-                    ${!hasLiveVideo &&
-                    (stateObj.state === 'unavailable' || stateObj.state === 'unknown')
-                      ? html`<div class="availability-warning" role="status">
-                          Home Assistant reports ${stateObj.state}. Live playback is
-                          independent.
-                        </div>`
-                      : nothing}
-                    <button
-                      class="reconnect"
-                      aria-label="Reconnect live stream"
-                      title="Reconnect live stream"
-                      @click=${() => this._liveAttempt++}
-                    >
-                      <ha-icon icon="mdi:refresh"></ha-icon>
-                    </button>`
-                : stateObj.state === 'unavailable' ||
-                    stateObj.attributes.restored === true
-                  ? html`<div class="message">${pair.title} is unavailable</div>`
-                  : webRTC
-                    ? html`<div class="message">
-                        This entity does not advertise live streaming. Select Automatic
-                        playback or a stream-enabled camera.
-                      </div>`
-                    : html`<ha-camera-stream
-                        .hass=${this.hass}
-                        .stateObj=${stateObj}
-                        .controls=${false}
-                        .muted=${true}
-                      ></ha-camera-stream>`}
-        ${this._recordingMode && this._recordingLoading
-          ? html`<div class="message recording-loading">Loading recording…</div>`
-          : nothing}
-        ${model.cameras.length > 1
-          ? html`
-              <button
-                class="navigation previous"
-                title="Previous camera"
-                aria-label="Previous camera"
-                @click=${() => this._selectCamera(-1)}
+        <div
+          class="stream-viewport"
+          @touchstart=${this._touchStart}
+          @touchmove=${this._touchMove}
+          @touchend=${this._touchEnd}
+          @touchcancel=${this._touchEnd}
+          @click=${{
+            handleEvent: (event: Event) => this._videoClick(event),
+            capture: true,
+          }}
+        >
+          <div
+            class="zoom-surface"
+            style=${styleMap({
+              transform: `translate(${this._zoom.x}px, ${this._zoom.y}px) scale(${this._zoom.scale})`,
+            })}
+          >
+            ${this._recordingMode
+              ? this._recordingUrl
+                ? html`<video
+                    class="recording-video"
+                    src=${this._recordingUrl}
+                    ?autoplay=${!this._recordingPaused}
+                    .muted=${this._recordingMuted}
+                    .playbackRate=${this._recordingRate}
+                    playsinline
+                    aria-label="Recording video"
+                    @click=${() => void this._toggleRecordingPlayback()}
+                    @canplay=${this._recordingCanPlay}
+                    @play=${() => (this._recordingPaused = false)}
+                    @pause=${(event: Event) => {
+                      const video = event.currentTarget as HTMLVideoElement;
+                      if (!this._recordingLoading && !video.ended) {
+                        this._recordingPaused = true;
+                      }
+                    }}
+                    @timeupdate=${this._recordingTimeUpdate}
+                    @ended=${() => this._advanceRecording(pair.main)}
+                    @error=${() => {
+                      this._recordingLoading = false;
+                      this._markRecordingUnavailable(pair.main);
+                      this._recordingNotice =
+                        'Recording could not be played. UniFi Protect media requires Full access mode and available footage.';
+                    }}
+                  ></video>`
+                : nothing
+              : !this._elementsReady
+                ? html`<div class="message">Loading camera stream…</div>`
+                : !stateObj
+                  ? html`<div class="message">Camera entity not found: ${entity}</div>`
+                  : canAttemptWebRTC
+                    ? html`${keyed(
+                        `${entity}:webrtc`,
+                        html`
+                          <ha-web-rtc-player
+                            .hass=${this.hass}
+                            .entityid=${entity}
+                            .controls=${false}
+                            .muted=${true}
+                            @streams=${(event: CustomEvent<{ hasVideo: boolean }>) => {
+                              if (
+                                event.currentTarget !==
+                                this.shadowRoot?.querySelector('ha-web-rtc-player')
+                              ) {
+                                return;
+                              }
+                              this._livePlayback = {
+                                player: event.currentTarget as HTMLElement,
+                                entity,
+                                hasVideo: event.detail.hasVideo === true,
+                              };
+                            }}
+                            autoplay
+                            playsinline
+                          ></ha-web-rtc-player>
+                        `,
+                      )}
+                      ${!hasLiveVideo &&
+                      (stateObj.state === 'unavailable' || stateObj.state === 'unknown')
+                        ? html`<div class="availability-warning" role="status">
+                            Home Assistant reports ${stateObj.state}. Live playback is
+                            independent.
+                          </div>`
+                        : nothing} `
+                    : stateObj.state === 'unavailable' ||
+                        stateObj.attributes.restored === true
+                      ? html`<div class="message">${pair.title} is unavailable</div>`
+                      : webRTC
+                        ? html`<div class="message">
+                            This entity does not advertise live streaming. Select
+                            Automatic playback or a stream-enabled camera.
+                          </div>`
+                        : html`<ha-camera-stream
+                            .hass=${this.hass}
+                            .stateObj=${stateObj}
+                            .controls=${false}
+                            .muted=${true}
+                          ></ha-camera-stream>`}
+            ${this._recordingMode && this._recordingLoading
+              ? html`<div class="message recording-loading">Loading recording…</div>`
+              : nothing}
+          </div>
+        </div>
+        <div class="view-controls">
+          ${model.cameras.length > 1
+            ? html`
+                <button
+                  class="navigation previous"
+                  title="Previous camera"
+                  aria-label="Previous camera"
+                  @click=${() => this._selectCamera(-1)}
+                >
+                  <ha-icon icon="mdi:chevron-left"></ha-icon>
+                </button>
+                <button
+                  class="navigation next"
+                  title="Next camera"
+                  aria-label="Next camera"
+                  @click=${() => this._selectCamera(1)}
+                >
+                  <ha-icon icon="mdi:chevron-right"></ha-icon>
+                </button>
+              `
+            : nothing}
+          ${this._renderControls(pair, model)}
+          ${this._fullscreen && this._zoom.scale > 1
+            ? html`<button
+                class="zoom-reset"
+                aria-label="Reset zoom"
+                @click=${this._resetZoom}
               >
-                <ha-icon icon="mdi:chevron-left"></ha-icon>
-              </button>
-              <button
-                class="navigation next"
-                title="Next camera"
-                aria-label="Next camera"
-                @click=${() => this._selectCamera(1)}
-              >
-                <ha-icon icon="mdi:chevron-right"></ha-icon>
-              </button>
-            `
-          : nothing}
-        ${this._renderControls(pair, model)}
+                ${this._zoom.scale.toFixed(1)}×
+                <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
+              </button>`
+            : nothing}
+        </div>
         ${this._recordingMode ? this._renderRecordingPlayer(pair) : nothing}
         ${!this._recordingMode && presetGroup?.device_id
-          ? this._renderPresets(presetGroup, model.settings.button_size)
+          ? html`<div class="preset-row" role="group" aria-label="Camera presets">
+              ${this._renderPresets(presetGroup, model.settings.button_size)}
+            </div>`
           : nothing}
         ${this._error
           ? html`<div class="error" role="alert">
@@ -1318,21 +1391,105 @@ export class CameraCard extends LitElement {
         color: white;
       }
 
-      /* Keep playback controls in flow: narrow toolbars and long recording
-       * notices must never overlap the top controls or leave the media surface. */
+      .stream-viewport {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .zoom-surface {
+        position: absolute;
+        inset: 0;
+        transform-origin: center;
+      }
+      .fullscreen .stream-viewport {
+        touch-action: none;
+      }
       .camera.recording-mode {
         height: auto;
-        display: grid;
-        grid-template-rows: minmax(64px, 1fr) auto;
         aspect-ratio: auto;
-        min-height: max(280px, 56.25cqw);
+        overflow: visible;
       }
-
+      .recording-mode .stream-viewport {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+      }
       .camera.fullscreen {
         min-height: 0;
         width: 100vw;
         height: 100dvh;
         aspect-ratio: auto;
+      }
+      .camera.fullscreen.recording-mode {
+        display: flex;
+        flex-direction: column;
+        overflow: auto;
+      }
+      .fullscreen.recording-mode .stream-viewport {
+        flex: 1 0 140px;
+        min-height: 140px;
+        aspect-ratio: auto;
+      }
+      .recording-mode .view-controls {
+        position: relative;
+        inset: auto;
+        display: flex;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px;
+        flex-shrink: 0;
+        background: var(--ha-card-background, #252836);
+      }
+      .recording-mode .view-controls button {
+        position: static;
+        transform: none;
+        flex: 0 0 44px;
+      }
+      .zoom-reset {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        z-index: 4;
+        min-height: 44px;
+        border-radius: 12px;
+        padding: 0 10px;
+        background: rgba(0, 0, 0, 0.65);
+      }
+      @container (max-width: 600px) {
+        .preset-row {
+          position: absolute;
+          bottom: max(8px, env(safe-area-inset-bottom, 0px));
+          left: 8px;
+          right: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: safe center;
+          gap: 8px;
+          overflow-x: auto;
+          padding: 2px;
+          z-index: 3;
+        }
+        .preset-row .overlay-button {
+          position: static;
+          transform: none;
+          flex: 0 0 auto;
+        }
+        .view-controls {
+          position: absolute;
+          top: max(8px, env(safe-area-inset-top, 0px));
+          left: 8px;
+          right: 8px;
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+          z-index: 3;
+        }
+        .view-controls .overlay-button {
+          position: static;
+          transform: none;
+          flex: 0 0 auto;
+        }
       }
 
       ha-camera-stream,
@@ -1353,16 +1510,6 @@ export class CameraCard extends LitElement {
         color: #ffd180;
         font-size: 12px;
         pointer-events: none;
-      }
-
-      .reconnect {
-        position: absolute;
-        right: 8px;
-        bottom: 8px;
-        width: 44px;
-        height: 44px;
-        border-radius: var(--tile-border-radius, 12px);
-        background: rgba(0, 0, 0, 0.6);
       }
 
       .recording-video {
@@ -1519,8 +1666,6 @@ export class CameraCard extends LitElement {
 
       .recording-player {
         position: relative;
-        grid-row: 2;
-        align-self: end;
         min-width: 0;
         max-height: calc(100dvh - 80px);
         margin: 8px;

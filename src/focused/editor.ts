@@ -119,7 +119,7 @@ const PRESET_SCHEMA: readonly FormSchema[] = [
 
 const CAMERA_LABELS: Record<string, string> = {
   title: 'Camera name',
-  main: 'Main stream',
+  main: 'SD stream (default)',
   hd: 'HD stream (optional)',
 };
 
@@ -381,8 +381,8 @@ export class CameraCardEditor extends LitElement {
         },
       )}
       <p class="helper">
-        Add one main stream and an optional HD stream for each camera. Drag rows or use
-        the arrow buttons to set the camera navigation order.
+        Add one SD/default stream and an optional HD stream for each camera. Drag rows or
+        use the arrow buttons to set the camera navigation order.
       </p>
       <ha-sortable
         handle-selector=".handle"

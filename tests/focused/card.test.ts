@@ -255,6 +255,11 @@ describe('focused card', () => {
     expect(card.shadowRoot?.querySelector('video')?.controls).toBe(false);
     expect(card.shadowRoot?.querySelector('.camera.recording-mode')).not.toBeNull();
     expect(
+      card.shadowRoot?.querySelector('.stream-viewport .recording-player'),
+    ).toBeNull();
+    expect(card.shadowRoot?.querySelector('.stream-viewport .view-controls')).toBeNull();
+    expect(card.shadowRoot?.querySelector('.stream-viewport video')).not.toBeNull();
+    expect(
       card.shadowRoot?.querySelectorAll('.recording-player-actions > *'),
     ).toHaveLength(8);
     expect(card.shadowRoot?.querySelectorAll('input[type="range"]')).toHaveLength(1);

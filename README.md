@@ -9,7 +9,7 @@ Illustration of the live view and controls; no private camera footage.
 
 ## Features
 
-- Main and HD Home Assistant camera streams.
+- SD by default, with explicit switching to the configured HD stream.
 - Per-camera UniFi Protect recording playback with a mobile-friendly custom player,
   full-day seeking, and continuous short-clip playback.
 - Reorderable camera navigation.
@@ -46,7 +46,7 @@ Open the dashboard editor to configure the rest visually.
 For every camera, choose:
 
 - Camera name.
-- Main stream entity.
+- SD/default stream entity (choose the lower-resolution entity).
 - Optional HD stream entity.
 
 Drag camera rows or use the arrow buttons to change navigation order.
@@ -63,8 +63,9 @@ focused:
 
 WebRTC-only requires a stream-enabled entity, an HA WebRTC provider, and a browser
 that supports the camera's codec. It deliberately does not fall back to HLS or
-snapshots. Native playback errors remain visible; the reconnect button retries
-the selected stream. HD/main selection, recordings, and PTZ controls are unchanged.
+snapshots. Native playback errors remain visible. There is no separate refresh
+button; switching SD/HD selects the corresponding native stream. Camera navigation
+and reopening the card return to the default stream.
 
 An unavailable entity with streaming support may still have a working WebRTC
 path. In this mode the card attempts playback and shows an HA availability warning
@@ -220,3 +221,17 @@ For the responsive playback regression fixture, build the card, serve the
 repository locally, and open `tests/fixtures/focused-playback.html`. It checks
 320px, 390px, 480px and 760px cards, a narrow card in a desktop viewport, and a
 long notice and landscape fullscreen for clipping, overlap and undersized controls.
+
+## Mobile controls and fullscreen
+
+On cards up to 600px wide, PTZ presets use a centered horizontal row with fixed
+44px-or-larger targets. Long rows scroll horizontally; desktop percentage positions
+remain configurable. In recordings mode the navigation, view controls and timeline
+are below the video, allowing the card to grow instead of covering the footage.
+
+In fullscreen, pinch with two fingers to magnify the stream locally (1–5×), then
+drag to pan. The zoom indicator resets to 1× when pressed. Exiting fullscreen,
+changing camera, changing quality or switching live/recordings resets the zoom.
+This is digital viewing only and never sends PTZ commands. Normal dashboard
+scrolling remains available outside fullscreen. Touch behavior is supported in both
+native fullscreen and the iOS viewport fallback.

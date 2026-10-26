@@ -74,7 +74,7 @@ describe('live transport', () => {
     },
   );
 
-  it('hides the warning only after video and restores it on failure or reconnect', async () => {
+  it('hides the warning only after video and restores it on failure', async () => {
     const card = await renderCamera('unavailable');
     const player = card.shadowRoot!.querySelector('ha-web-rtc-player')!;
     const report = (hasVideo: boolean) =>
@@ -89,16 +89,9 @@ describe('live transport', () => {
     report(false);
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('[role="status"]')).not.toBeNull();
-    report(true);
-    await card.updateComplete;
-    card.shadowRoot
-      ?.querySelector<HTMLButtonElement>('[aria-label="Reconnect live stream"]')
-      ?.click();
-    await card.updateComplete;
-    expect(card.shadowRoot?.querySelector('[role="status"]')).not.toBeNull();
-    report(true);
-    await card.updateComplete;
-    expect(card.shadowRoot?.querySelector('[role="status"]')).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Reconnect live stream"]'),
+    ).toBeNull();
   });
 
   it('does not reuse video confirmation after a card is reattached', async () => {
@@ -129,7 +122,7 @@ describe('live transport', () => {
     expect(card.shadowRoot?.querySelector('ha-web-rtc-player')).toBeNull();
   });
 
-  it('remounts on reconnect and HD selection, not on an availability update', async () => {
+  it('starts in SD and remounts only on explicit HD selection, not on availability updates', async () => {
     const card = await renderCamera('unavailable');
     const original = card.shadowRoot?.querySelector('ha-web-rtc-player');
     card.hass = {
@@ -145,12 +138,6 @@ describe('live transport', () => {
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('ha-web-rtc-player')).toBe(original);
     expect(card.shadowRoot?.querySelector('[role="status"]')).toBeNull();
-    card.shadowRoot
-      ?.querySelector<HTMLButtonElement>('[aria-label="Reconnect live stream"]')
-      ?.click();
-    await card.updateComplete;
-    const reconnected = card.shadowRoot?.querySelector('ha-web-rtc-player');
-    expect(reconnected).not.toBe(original);
     card.hass = {
       ...card.hass!,
       states: {
@@ -177,8 +164,79 @@ describe('live transport', () => {
     const hd = card.shadowRoot?.querySelector('ha-web-rtc-player') as HTMLElement & {
       entityid: string;
     };
-    expect(hd).not.toBe(reconnected);
+    expect(hd).not.toBe(original);
     expect(hd.entityid).toBe('camera.hd');
+    card.remove();
+    document.body.append(card);
+    await card.updateComplete;
+    expect(
+      (
+        card.shadowRoot?.querySelector('ha-web-rtc-player') as HTMLElement & {
+          entityid: string;
+        }
+      ).entityid,
+    ).toBe('camera.main');
+  });
+
+  it('pinches and pans only in fullscreen, resets on exit, and never calls PTZ', async () => {
+    const card = await renderCamera();
+    const surface = card.shadowRoot!.querySelector<HTMLElement>('.stream-viewport')!;
+    Object.defineProperties(surface, {
+      clientWidth: { value: 400 },
+      clientHeight: { value: 200 },
+    });
+    const touch = (type: string, points: number[][]) => {
+      const event = new Event(type, { cancelable: true, bubbles: true });
+      Object.defineProperty(event, 'touches', {
+        value: points.map(([clientX, clientY]) => ({ clientX, clientY })),
+      });
+      surface.dispatchEvent(event);
+      return event;
+    };
+    touch('touchstart', [
+      [100, 100],
+      [200, 100],
+    ]);
+    expect(
+      touch('touchmove', [
+        [50, 100],
+        [250, 100],
+      ]).defaultPrevented,
+    ).toBe(false);
+    card
+      .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')!
+      .click();
+    await Promise.resolve();
+    await card.updateComplete;
+    touch('touchstart', [
+      [100, 100],
+      [200, 100],
+    ]);
+    expect(
+      touch('touchmove', [
+        [50, 100],
+        [250, 100],
+      ]).defaultPrevented,
+    ).toBe(true);
+    await card.updateComplete;
+    expect(
+      card.shadowRoot!.querySelector<HTMLElement>('.zoom-surface')!.style.transform,
+    ).toContain('scale(2)');
+    expect(card.shadowRoot!.querySelector('[aria-label="Reset zoom"]')).not.toBeNull();
+    touch('touchend', [[150, 100]]);
+    touch('touchmove', [[180, 100]]);
+    await card.updateComplete;
+    expect(
+      card.shadowRoot!.querySelector<HTMLElement>('.zoom-surface')!.style.transform,
+    ).toContain('80px');
+    card
+      .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Exit fullscreen"]')!
+      .click();
+    await card.updateComplete;
+    expect(
+      card.shadowRoot!.querySelector<HTMLElement>('.zoom-surface')!.style.transform,
+    ).toContain('scale(1)');
+    expect(card.hass!.callService).not.toHaveBeenCalled();
   });
 
   it('exposes the transport option in the visual editor and preserves it on edits', async () => {
