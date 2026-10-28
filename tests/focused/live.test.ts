@@ -8,6 +8,10 @@ if (!customElements.get('ha-camera-stream')) {
   customElements.define('ha-camera-stream', class extends HTMLElement {});
 }
 
+if (!customElements.get('ha-web-rtc-player')) {
+  customElements.define('ha-web-rtc-player', class extends HTMLElement {});
+}
+
 afterEach(() => document.body.replaceChildren());
 
 async function renderCamera(

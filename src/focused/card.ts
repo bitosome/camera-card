@@ -1,5 +1,18 @@
-import { initialZoom, moveZoom, type ZoomPoint } from './zoom.js';
-import { css, html, LitElement, nothing, type TemplateResult } from 'lit';
+import {
+  MediaZoomController,
+  ensureCameraStreamElements,
+  isMediaFullscreen,
+  toggleMediaFullscreen,
+  type MediaFullscreenAPI,
+} from '@bitosome/ha-card-ui';
+import {
+  css,
+  html,
+  LitElement,
+  nothing,
+  type PropertyValues,
+  type TemplateResult,
+} from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
 import { familyStyles, UI_ICONS } from '../shared/card-primitives.js';
@@ -17,10 +30,6 @@ import type {
   RawFocusedConfig,
 } from './types.js';
 
-interface CardHelpers {
-  createCardElement(config: Record<string, unknown>): Promise<HTMLElement>;
-}
-
 interface EntityRegistryEntry {
   config_entry_id?: string | null;
   platform?: string;
@@ -32,38 +41,15 @@ interface SignedPath {
 
 declare global {
   interface Window {
-    loadCardHelpers?: () => Promise<CardHelpers>;
     customCards?: Array<Record<string, unknown>>;
   }
 }
 
-export interface FocusedFullscreenAPI {
-  readonly isEnabled: boolean;
-  readonly isFullscreen: boolean;
-  readonly element?: Element;
-  request(element: Element): Promise<void>;
-  exit(): Promise<void>;
-}
-
-export const isFocusedCardFullscreen = (
-  api: FocusedFullscreenAPI,
-  element: Element,
-): boolean => api.isEnabled && api.isFullscreen && api.element === element;
-
-export const toggleFocusedCardFullscreen = async (
-  api: FocusedFullscreenAPI,
-  element: Element,
-): Promise<boolean> => {
-  if (!api.isEnabled) {
-    return false;
-  }
-  if (api.isFullscreen) {
-    await api.exit();
-  } else {
-    await api.request(element);
-  }
-  return true;
-};
+// Compatibility exports; fullscreen ownership and success checks live in the
+// shared media implementation used by the printer card too.
+export type FocusedFullscreenAPI = MediaFullscreenAPI;
+export const isFocusedCardFullscreen = isMediaFullscreen;
+export const toggleFocusedCardFullscreen = toggleMediaFullscreen;
 
 interface PositionedOverlayButton extends FocusedOverlayButton {
   x: number;
@@ -345,7 +331,10 @@ export class CameraCard extends LitElement {
   };
 
   @state()
-  private _elementsReady = Boolean(customElements.get('ha-camera-stream'));
+  private _elementsReady = false;
+
+  @state()
+  private _elementError = '';
 
   @state()
   private _fullscreen = false;
@@ -395,60 +384,22 @@ export class CameraCard extends LitElement {
   @state()
   private _unavailableRecordings: Record<string, RecordingRange[]> = {};
 
-  @state() private _zoom = initialZoom();
-  private _gesture?: { points: ZoomPoint[]; zoom: ReturnType<typeof initialZoom> };
-  private _suppressVideoClick = false;
+  private _mediaZoom = new MediaZoomController(this, {
+    enabled: () => this._fullscreen,
+  });
   private _resetZoom(): void {
-    this._zoom = initialZoom();
-    this._gesture = undefined;
-    this._suppressVideoClick = false;
-  }
-  private _touchPoints(event: TouchEvent): ZoomPoint[] {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    return Array.from(event.touches)
-      .slice(0, 2)
-      .map((t) => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }));
-  }
-  private _touchStart(event: TouchEvent): void {
-    if (
-      !this._fullscreen ||
-      event.composedPath().some((el) => el instanceof HTMLButtonElement)
-    )
-      return;
-    const points = this._touchPoints(event);
-    if (points.length === 2 || this._zoom.scale > 1) {
-      event.preventDefault();
-      this._suppressVideoClick = true;
-      this._gesture = { points, zoom: this._zoom };
-    }
-  }
-  private _touchMove(event: TouchEvent): void {
-    if (!this._fullscreen || !this._gesture) return;
-    event.preventDefault();
-    const el = event.currentTarget as HTMLElement;
-    this._zoom = moveZoom(
-      this._gesture.zoom,
-      this._gesture.points,
-      this._touchPoints(event),
-      el.clientWidth,
-      el.clientHeight,
-    );
-  }
-  private _touchEnd(event: TouchEvent): void {
-    this._gesture = undefined;
-    if (event.touches.length) this._touchStart(event);
+    this._mediaZoom.reset();
   }
   private _videoClick(event: Event): void {
-    if (event.composedPath().some((el) => el instanceof HTMLButtonElement)) return;
-    if (this._suppressVideoClick) {
-      event.preventDefault();
-      event.stopPropagation();
-      this._suppressVideoClick = false;
-    }
+    this._mediaZoom.consumeClick(event);
   }
 
   private _loadingElements?: Promise<void>;
+  private _elementsGeneration = 0;
+  private _elementsKey = '';
+  private _elementsRetryAt = 0;
   private _documentOverflow = '';
+  private _fullscreenRequest = 0;
   private _recordingRequest = 0;
   private _recordingSeeking = false;
   private _recordingDateEditing = false;
@@ -484,12 +435,15 @@ export class CameraCard extends LitElement {
     if (!model.cameras.length) {
       throw new Error('Add at least one main camera stream.');
     }
+    this._fullscreenRequest++;
     this._config = config;
     if (this._cameraIndex >= model.cameras.length) {
       this._cameraIndex = 0;
     }
     this._hd = this._hd && Boolean(model.cameras[this._cameraIndex]?.hd);
-    void this._loadHomeAssistantElements(model.cameras[0]?.main);
+    this._invalidateElements();
+    this._resetZoom();
+    void this._loadHomeAssistantElements();
   }
 
   public getCardSize(): number {
@@ -500,6 +454,7 @@ export class CameraCard extends LitElement {
     super.connectedCallback();
     this._hd = false;
     this._resetZoom();
+    void this._loadHomeAssistantElements();
     if (screenfull.isEnabled) {
       screenfull.on('change', this._fullscreenChanged);
     }
@@ -507,6 +462,9 @@ export class CameraCard extends LitElement {
 
   public disconnectedCallback(): void {
     this._livePlayback = undefined;
+    this._fullscreenRequest++;
+    this._invalidateElements();
+    this._resetZoom();
     if (screenfull.isEnabled) {
       screenfull.off('change', this._fullscreenChanged);
     }
@@ -520,25 +478,53 @@ export class CameraCard extends LitElement {
     this._resetZoom();
   };
 
-  private async _loadHomeAssistantElements(cameraEntity = ''): Promise<void> {
-    if (this._elementsReady || this._loadingElements) {
-      return this._loadingElements;
+  protected updated(changed: PropertyValues): void {
+    if (changed.has('hass') || changed.has('_cameraIndex') || changed.has('_hd')) {
+      void this._loadHomeAssistantElements();
     }
+  }
+
+  private _invalidateElements(): void {
+    this._elementsGeneration++;
+    this._loadingElements = undefined;
+    this._elementsKey = '';
+    this._elementsReady = false;
+    this._elementError = '';
+    this._elementsRetryAt = 0;
+  }
+
+  private async _loadHomeAssistantElements(force = false): Promise<void> {
+    const model = this._getModel();
+    const pair = model?.cameras[this._cameraIndex];
+    if (!this.isConnected || !model || !pair) return;
+    const entity = this._activeEntity(pair);
+    const tag =
+      model.settings.live_transport === 'webrtc'
+        ? 'ha-web-rtc-player'
+        : 'ha-camera-stream';
+    const key = `${entity}:${tag}`;
+    if (this._elementsKey === key) {
+      if (this._elementsReady) return;
+      if (this._loadingElements) return this._loadingElements;
+      if (!force && Date.now() < this._elementsRetryAt) return;
+    }
+    const generation = ++this._elementsGeneration;
+    this._elementsKey = key;
+    this._elementsReady = Boolean(customElements.get(tag));
+    this._elementError = '';
+    if (this._elementsReady) return;
     this._loadingElements = (async () => {
       try {
-        if (!customElements.get('ha-camera-stream')) {
-          const helpers = await window.loadCardHelpers?.();
-          await helpers?.createCardElement({
-            type: 'picture-entity',
-            entity: cameraEntity,
-            camera_view: 'live',
-          });
-          await customElements.whenDefined('ha-camera-stream');
-        }
+        await ensureCameraStreamElements(entity, tag);
+        if (generation !== this._elementsGeneration || !this.isConnected) return;
         this._elementsReady = true;
       } catch (error) {
-        this._error =
+        if (generation !== this._elementsGeneration || !this.isConnected) return;
+        this._elementsRetryAt = Date.now() + 30_000;
+        this._elementError =
           error instanceof Error ? error.message : 'Could not load camera stream.';
+      } finally {
+        if (generation === this._elementsGeneration) this._loadingElements = undefined;
       }
     })();
     return this._loadingElements;
@@ -806,16 +792,25 @@ export class CameraCard extends LitElement {
   }
 
   private async _toggleFullscreen(): Promise<void> {
+    const request = ++this._fullscreenRequest;
     if (this.hasAttribute('data-fullscreen-fallback')) {
       this._setFallbackFullscreen(false);
       return;
     }
-    try {
-      const nativeFullscreen = await toggleFocusedCardFullscreen(screenfull, this);
-      if (!nativeFullscreen) {
-        this._setFallbackFullscreen(true);
+    const nativeFullscreen = await toggleFocusedCardFullscreen(screenfull, this);
+    if (!this.isConnected || request !== this._fullscreenRequest) {
+      if (isFocusedCardFullscreen(screenfull, this)) {
+        try {
+          await screenfull.exit();
+        } catch {
+          /* Native teardown can race browser exit. */
+        }
       }
-    } catch {
+      return;
+    }
+    if (nativeFullscreen) {
+      this._fullscreenChanged();
+    } else if (!screenfull.isEnabled || !screenfull.isFullscreen) {
       this._setFallbackFullscreen(true);
     }
   }
@@ -1205,10 +1200,10 @@ export class CameraCard extends LitElement {
       >
         <div
           class="stream-viewport"
-          @touchstart=${this._touchStart}
-          @touchmove=${this._touchMove}
-          @touchend=${this._touchEnd}
-          @touchcancel=${this._touchEnd}
+          @touchstart=${this._mediaZoom.touchStart}
+          @touchmove=${this._mediaZoom.touchMove}
+          @touchend=${this._mediaZoom.touchEnd}
+          @touchcancel=${this._mediaZoom.touchEnd}
           @click=${{
             handleEvent: (event: Event) => this._videoClick(event),
             capture: true,
@@ -1217,7 +1212,7 @@ export class CameraCard extends LitElement {
           <div
             class="zoom-surface"
             style=${styleMap({
-              transform: `translate(${this._zoom.x}px, ${this._zoom.y}px) scale(${this._zoom.scale})`,
+              transform: this._mediaZoom.transform,
             })}
           >
             ${this._recordingMode
@@ -1250,7 +1245,18 @@ export class CameraCard extends LitElement {
                   ></video>`
                 : nothing
               : !this._elementsReady
-                ? html`<div class="message">Loading camera stream…</div>`
+                ? html`<div class="message" role="status">
+                    ${this._elementError || 'Loading camera stream…'}
+                    ${this._elementError
+                      ? html`<button
+                          class="player-action"
+                          type="button"
+                          @click=${() => void this._loadHomeAssistantElements(true)}
+                        >
+                          Retry camera
+                        </button>`
+                      : nothing}
+                  </div>`
                 : !stateObj
                   ? html`<div class="message">Camera entity not found: ${entity}</div>`
                   : canAttemptWebRTC
@@ -1328,13 +1334,13 @@ export class CameraCard extends LitElement {
         </div>
         <div class="view-controls">
           ${this._renderControls(pair, model)}
-          ${this._fullscreen && this._zoom.scale > 1
+          ${this._fullscreen && this._mediaZoom.state.scale > 1
             ? html`<button
                 class="zoom-reset"
                 aria-label="Reset zoom"
                 @click=${this._resetZoom}
               >
-                ${this._zoom.scale.toFixed(1)}×
+                ${this._mediaZoom.state.scale.toFixed(1)}×
                 <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
               </button>`
             : nothing}

@@ -1,6 +1,6 @@
 {
   "name": "camera-card",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Focused Home Assistant camera card with UniFi Protect recordings and PTZ presets",
   "keywords": [
     "camera",
@@ -13,7 +13,7 @@
   "repository": "github:bitosome/camera-card",
   "license": "MIT",
   "dependencies": {
-    "@bitosome/ha-card-ui": "https://github.com/bitosome/ha-card-ui/releases/download/v1.0.1/bitosome-ha-card-ui-1.0.1.tgz",
+    "@bitosome/ha-card-ui": "https://github.com/bitosome/ha-card-ui/releases/download/v1.1.0/bitosome-ha-card-ui-1.1.0.tgz",
     "lit": "^3.1.4",
     "screenfull": "^6.0.2"
   },

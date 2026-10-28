@@ -19,6 +19,10 @@ import {
 import type { HomeAssistant } from '../../src/focused/types';
 
 // @vitest-environment jsdom
+for (const tag of ['ha-camera-stream', 'ha-web-rtc-player']) {
+  if (!customElements.get(tag)) customElements.define(tag, class extends HTMLElement {});
+}
+
 describe('focused card', () => {
   it('calls the UniFi Protect preset service directly', async () => {
     const callService = vi.fn().mockResolvedValue(undefined);
@@ -67,6 +71,36 @@ describe('focused card', () => {
       toggleFocusedCardFullscreen(api, document.createElement('div')),
     ).resolves.toBe(false);
     expect(api.request).not.toHaveBeenCalled();
+  });
+
+  it('does not exit another card fullscreen or claim entry when none occurred', async () => {
+    const owner = document.createElement('div');
+    const target = document.createElement('div');
+    const api: FocusedFullscreenAPI = {
+      isEnabled: true,
+      isFullscreen: true,
+      element: owner,
+      request: vi.fn(),
+      exit: vi.fn(),
+    };
+    await expect(toggleFocusedCardFullscreen(api, target)).resolves.toBe(false);
+    expect(api.exit).not.toHaveBeenCalled();
+    expect(api.request).not.toHaveBeenCalled();
+    Object.assign(api, { isFullscreen: false, element: undefined });
+    await expect(toggleFocusedCardFullscreen(api, target)).resolves.toBe(false);
+    expect(api.request).toHaveBeenCalledWith(target);
+  });
+
+  it('uses the fallback after a rejected native request', async () => {
+    const api: FocusedFullscreenAPI = {
+      isEnabled: true,
+      isFullscreen: false,
+      request: vi.fn().mockRejectedValue(new Error('Unavailable')),
+      exit: vi.fn(),
+    };
+    await expect(
+      toggleFocusedCardFullscreen(api, document.createElement('div')),
+    ).resolves.toBe(false);
   });
 
   it('uses safe runtime values without rewriting editable drafts', () => {

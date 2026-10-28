@@ -12,12 +12,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@bitosome/ha-card-ui@https://github.com/bitosome/ha-card-ui/releases/download/v1.0.1/bitosome-ha-card-ui-1.0.1.tgz":
-  version: 1.0.1
-  resolution: "@bitosome/ha-card-ui@https://github.com/bitosome/ha-card-ui/releases/download/v1.0.1/bitosome-ha-card-ui-1.0.1.tgz"
+"@bitosome/ha-card-ui@https://github.com/bitosome/ha-card-ui/releases/download/v1.1.0/bitosome-ha-card-ui-1.1.0.tgz":
+  version: 1.1.0
+  resolution: "@bitosome/ha-card-ui@https://github.com/bitosome/ha-card-ui/releases/download/v1.1.0/bitosome-ha-card-ui-1.1.0.tgz"
   peerDependencies:
     lit: ^2.0.0 || ^3.0.0
-  checksum: 10c0/277084efa6338d2d8845ce9204d7d0f651693683f2ab98e4ced81113518537fd63fa2f814c579982f225fab4061f7d5c9f20e50a0f70f9d19e082914d96f31f0
+  checksum: 10c0/b38485d5045f07f68a968e85979c877c2489b65e5d9382e83588c882ee26b0803c22a591fb9a087f3db03eaeea6d543ed4c572ac160c7e84f5bb809cd3df5a1c
   languageName: node
   linkType: hard
 
@@ -1106,7 +1106,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "camera-card@workspace:."
   dependencies:
-    "@bitosome/ha-card-ui": "https://github.com/bitosome/ha-card-ui/releases/download/v1.0.1/bitosome-ha-card-ui-1.0.1.tgz"
+    "@bitosome/ha-card-ui": "https://github.com/bitosome/ha-card-ui/releases/download/v1.1.0/bitosome-ha-card-ui-1.1.0.tgz"
     "@rollup/plugin-node-resolve": "npm:^15.2.3"
     "@rollup/plugin-terser": "npm:^0.4.4"
     "@rollup/plugin-typescript": "npm:^11.1.6"
