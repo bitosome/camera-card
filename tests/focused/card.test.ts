@@ -235,7 +235,7 @@ describe('focused card', () => {
       ?.click();
     await Promise.resolve();
     await card.updateComplete;
-    expect(card.hasAttribute('data-fullscreen-fallback')).toBe(true);
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(true);
     expect(
       card.shadowRoot?.querySelector('[aria-label="Exit fullscreen"]'),
     ).not.toBeNull();
@@ -244,7 +244,7 @@ describe('focused card', () => {
       ?.querySelector<HTMLButtonElement>('[aria-label="Exit fullscreen"]')
       ?.click();
     await card.updateComplete;
-    expect(card.hasAttribute('data-fullscreen-fallback')).toBe(false);
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
     card.remove();
   });
 

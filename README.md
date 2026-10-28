@@ -233,7 +233,7 @@ In fullscreen, pinch with two fingers to magnify the stream locally (1–5×), t
 drag to pan. The zoom indicator resets to 1× when pressed. Exiting fullscreen,
 changing camera, changing quality or switching live/recordings resets the zoom.
 Both this card and the printer card use the shared `@bitosome/ha-card-ui` media
-controller for zoom, native-fullscreen ownership, and loading HA stream elements.
+controllers for zoom, native-fullscreen ownership, in-place viewport expansion and loading HA stream elements. The same player stays mounted. On iOS, the fullscreen button expands the feed to the viewport with no modal header; press it again or Escape to return. Supported browsers promote the existing card into the top layer, preventing dashboard clipping. Focus and page scrolling are restored on exit.
 This is digital viewing only and never sends PTZ commands. Normal dashboard
 scrolling remains available outside fullscreen. Touch behavior is supported in both
 native fullscreen and the iOS viewport fallback.

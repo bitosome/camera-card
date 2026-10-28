@@ -112,3 +112,81 @@ describe('shared stream bootstrap', () => {
     expect(card.shadowRoot?.querySelector('ha-web-rtc-player')).not.toBeNull();
   });
 });
+
+describe('shared in-place fullscreen fallback', () => {
+  it('keeps the same player, contains focus, and exits without a modal', async () => {
+    const card = await mount();
+    calls[0].resolve();
+    await settled(card);
+    const player = card.shadowRoot!.querySelector('ha-web-rtc-player');
+    const opener = card.shadowRoot!.querySelector<HTMLButtonElement>(
+      '[aria-label="Enter fullscreen"]',
+    )!;
+    opener.focus();
+    opener.click();
+    await settled(card);
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(true);
+    expect(card.shadowRoot!.querySelector('ha-web-rtc-player')).toBe(player);
+    expect(card.shadowRoot!.querySelector('dialog')).toBeNull();
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    expect(
+      card
+        .shadowRoot!.querySelector('[aria-label="Exit fullscreen"] ha-icon')
+        ?.getAttribute('icon'),
+    ).toBe('mdi:fullscreen-exit');
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await settled(card);
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+    expect(document.documentElement.style.overflow).toBe('');
+    expect(card.shadowRoot!.activeElement).toBe(opener);
+    expect(card.shadowRoot!.querySelector('ha-web-rtc-player')).toBe(player);
+    expect(card.hass?.callService).not.toHaveBeenCalled();
+  });
+
+  it('releases the viewport on configuration change and teardown', async () => {
+    const card = await mount();
+    calls[0].resolve();
+    await settled(card);
+    const open = async () => {
+      card
+        .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')!
+        .click();
+      await settled(card);
+      expect(card.hasAttribute('data-media-fullscreen')).toBe(true);
+    };
+    await open();
+    card.setConfig({ cameras: [{ camera_entity: 'camera.fixture' }] });
+    await settled(card);
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+    expect(document.documentElement.style.overflow).toBe('');
+    await open();
+    card.remove();
+    expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+    expect(document.body.style.overflow).toBe('');
+  });
+});
+
+it('keeps a configured active fullscreen icon', async () => {
+  const card = await mount();
+  card.setConfig({
+    cameras: [{ camera_entity: 'camera.fixture' }],
+    focused: {
+      fullscreen: {
+        icon: 'mdi:arrow-expand-all',
+        active_icon: 'mdi:arrow-collapse-all',
+      },
+    },
+  });
+  await settled(card);
+  card
+    .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')!
+    .click();
+  await settled(card);
+  expect(
+    card
+      .shadowRoot!.querySelector('[aria-label="Exit fullscreen"] ha-icon')
+      ?.getAttribute('icon'),
+  ).toBe('mdi:arrow-collapse-all');
+});

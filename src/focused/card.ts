@@ -1,5 +1,7 @@
 import {
   MediaZoomController,
+  MediaFullscreenFallbackController,
+  mediaFullscreenStyles,
   ensureCameraStreamElements,
   isMediaFullscreen,
   toggleMediaFullscreen,
@@ -398,7 +400,13 @@ export class CameraCard extends LitElement {
   private _elementsGeneration = 0;
   private _elementsKey = '';
   private _elementsRetryAt = 0;
-  private _documentOverflow = '';
+  private _fullscreenFallback = new MediaFullscreenFallbackController(this, {
+    onChange: (active) => {
+      this._fullscreen = active;
+      this._resetZoom();
+      this._error = '';
+    },
+  });
   private _fullscreenRequest = 0;
   private _recordingRequest = 0;
   private _recordingSeeking = false;
@@ -436,6 +444,7 @@ export class CameraCard extends LitElement {
       throw new Error('Add at least one main camera stream.');
     }
     this._fullscreenRequest++;
+    this._fullscreenFallback.close(false);
     this._config = config;
     if (this._cameraIndex >= model.cameras.length) {
       this._cameraIndex = 0;
@@ -469,12 +478,13 @@ export class CameraCard extends LitElement {
       screenfull.off('change', this._fullscreenChanged);
     }
     this._recordingRequest += 1;
-    this._setFallbackFullscreen(false);
+    this._fullscreenFallback.close(false);
     super.disconnectedCallback();
   }
 
   private _fullscreenChanged = (): void => {
-    this._fullscreen = isFocusedCardFullscreen(screenfull, this);
+    this._fullscreen =
+      this._fullscreenFallback.active || isFocusedCardFullscreen(screenfull, this);
     this._resetZoom();
   };
 
@@ -793,8 +803,8 @@ export class CameraCard extends LitElement {
 
   private async _toggleFullscreen(): Promise<void> {
     const request = ++this._fullscreenRequest;
-    if (this.hasAttribute('data-fullscreen-fallback')) {
-      this._setFallbackFullscreen(false);
+    if (this._fullscreenFallback.active) {
+      this._fullscreenFallback.close();
       return;
     }
     const nativeFullscreen = await toggleFocusedCardFullscreen(screenfull, this);
@@ -811,25 +821,8 @@ export class CameraCard extends LitElement {
     if (nativeFullscreen) {
       this._fullscreenChanged();
     } else if (!screenfull.isEnabled || !screenfull.isFullscreen) {
-      this._setFallbackFullscreen(true);
+      this._fullscreenFallback.open(this);
     }
-  }
-
-  private _setFallbackFullscreen(active: boolean): void {
-    if (active === this.hasAttribute('data-fullscreen-fallback')) {
-      return;
-    }
-    if (active) {
-      this._documentOverflow = document.documentElement.style.overflow;
-      document.documentElement.style.overflow = 'hidden';
-      this.setAttribute('data-fullscreen-fallback', '');
-    } else {
-      document.documentElement.style.overflow = this._documentOverflow;
-      this.removeAttribute('data-fullscreen-fallback');
-    }
-    this._fullscreen = active;
-    this._resetZoom();
-    this._error = '';
   }
 
   private async _goToPreset(group: FocusedPresetGroup, preset: string): Promise<void> {
@@ -1370,21 +1363,13 @@ export class CameraCard extends LitElement {
   static styles = [
     designTokens,
     familyStyles,
+    mediaFullscreenStyles,
     css`
       :host {
         display: block;
         min-width: 0;
         width: 100%;
         container-type: inline-size;
-      }
-
-      :host([data-fullscreen-fallback]) {
-        position: fixed;
-        inset: 0;
-        z-index: 10000;
-        width: 100vw;
-        height: 100dvh;
-        background: black;
       }
 
       ha-card,
