@@ -674,8 +674,9 @@ export class CameraCardEditor extends LitElement {
           <h4>Control row</h4>
           <p class="helper">
             Controls the center, vertical position, and spacing of the HD/SD, recording,
-            and fullscreen icons as one row. The complete row stays inside the camera
-            edge.
+            and fullscreen icons as one row on cards wider than 600px. The complete row
+            stays inside the camera edge. Narrower cards and fullscreen use the compact
+            top-right row.
           </p>
           ${this._form(
             this._model.settings.controls as unknown as FormData,

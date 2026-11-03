@@ -1,7 +1,14 @@
 import {
   MediaZoomController,
   MediaFullscreenFallbackController,
+  createMediaFullscreenAPI,
+  mediaButton,
+  mediaControls,
+  mediaControlStyles,
   mediaFullscreenStyles,
+  mediaMessage,
+  mediaNavigation,
+  mediaZoomReset,
   ensureCameraStreamElements,
   isMediaFullscreen,
   toggleMediaFullscreen,
@@ -17,16 +24,9 @@ import {
 } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
-import {
-  componentStyles,
-  familyStyles,
-  formatHassNumber,
-  pendingIndicator,
-  UI_ICONS,
-} from '../shared/card-primitives.js';
+import { componentStyles, familyStyles, UI_ICONS } from '../shared/card-primitives.js';
 import { designTokens } from '../shared/design-tokens.js';
 import { keyed } from 'lit/directives/keyed.js';
-import screenfull from 'screenfull';
 import { createDefaultModel, normalizeFocusedConfig } from './config.js';
 import type {
   FocusedCameraPair,
@@ -58,6 +58,11 @@ declare global {
 export type FocusedFullscreenAPI = MediaFullscreenAPI;
 export const isFocusedCardFullscreen = isMediaFullscreen;
 export const toggleFocusedCardFullscreen = toggleMediaFullscreen;
+
+// Resolves the element that really owns fullscreen through Home Assistant's
+// nested shadow roots; the document alone only reports the outermost host.
+const nativeFullscreen = createMediaFullscreenAPI(document);
+const FULLSCREEN_EVENTS = ['fullscreenchange', 'webkitfullscreenchange'];
 
 interface PositionedOverlayButton extends FocusedOverlayButton {
   x: number;
@@ -298,12 +303,17 @@ export const resolvePercentage = (value: FocusedPosition, fallback: number): num
     : fallback;
 };
 
+// Percentage position for a non-fullscreen card wider than 600px. Narrow cards
+// and fullscreen use the shared compact row, where these values are inert.
 const buttonStyle = (button: PositionedOverlayButton, size: number) => ({
-  left: button.left ?? `clamp(${size / 2}px, ${button.x}%, calc(100% - ${size / 2}px))`,
-  top: `clamp(${size / 2}px, ${button.y}%, calc(100% - ${size / 2}px))`,
-  width: `${size}px`,
-  height: `${size}px`,
-  '--focused-icon-size': `${Math.min(28, Math.round(size * 0.55))}px`,
+  '--media-slot-left':
+    button.left ?? `clamp(${size / 2}px, ${button.x}%, calc(100% - ${size / 2}px))`,
+  '--media-slot-top': `clamp(${size / 2}px, ${button.y}%, calc(100% - ${size / 2}px))`,
+});
+
+const mediaButtonSizeStyle = (size: number) => ({
+  '--family-media-button-size': `${size}px`,
+  '--family-media-icon-size': `${Math.min(28, Math.round(size * 0.55))}px`,
 });
 
 export const callUniFiPreset = async (
@@ -473,9 +483,11 @@ export class CameraCard extends LitElement {
     this._hd = false;
     this._resetZoom();
     void this._loadHomeAssistantElements();
-    if (screenfull.isEnabled) {
-      screenfull.on('change', this._fullscreenChanged);
+    for (const type of FULLSCREEN_EVENTS) {
+      document.addEventListener(type, this._fullscreenChanged);
     }
+    // A card detached while fullscreen misses the exit event; resync on return.
+    this._fullscreenChanged();
   }
 
   public disconnectedCallback(): void {
@@ -483,8 +495,8 @@ export class CameraCard extends LitElement {
     this._fullscreenRequest++;
     this._invalidateElements();
     this._resetZoom();
-    if (screenfull.isEnabled) {
-      screenfull.off('change', this._fullscreenChanged);
+    for (const type of FULLSCREEN_EVENTS) {
+      document.removeEventListener(type, this._fullscreenChanged);
     }
     this._recordingRequest += 1;
     this._fullscreenFallback.close(false);
@@ -493,7 +505,7 @@ export class CameraCard extends LitElement {
 
   private _fullscreenChanged = (): void => {
     this._fullscreen =
-      this._fullscreenFallback.active || isFocusedCardFullscreen(screenfull, this);
+      this._fullscreenFallback.active || isFocusedCardFullscreen(nativeFullscreen, this);
     this._resetZoom();
   };
 
@@ -816,20 +828,20 @@ export class CameraCard extends LitElement {
       this._fullscreenFallback.close();
       return;
     }
-    const nativeFullscreen = await toggleFocusedCardFullscreen(screenfull, this);
+    const toggled = await toggleFocusedCardFullscreen(nativeFullscreen, this);
     if (!this.isConnected || request !== this._fullscreenRequest) {
-      if (isFocusedCardFullscreen(screenfull, this)) {
+      if (isFocusedCardFullscreen(nativeFullscreen, this)) {
         try {
-          await screenfull.exit();
+          await nativeFullscreen.exit();
         } catch {
           /* Native teardown can race browser exit. */
         }
       }
       return;
     }
-    if (nativeFullscreen) {
+    if (toggled) {
       this._fullscreenChanged();
-    } else if (!screenfull.isEnabled || !screenfull.isFullscreen) {
+    } else if (!nativeFullscreen.isEnabled || !nativeFullscreen.isFullscreen) {
       this._fullscreenFallback.open(this);
     }
   }
@@ -866,20 +878,25 @@ export class CameraCard extends LitElement {
     if (!button.enabled) {
       return nothing;
     }
+    // The slot is layout only (display: contents) except on a non-fullscreen card
+    // wider than 600px, where it carries the configured percentage position.
+    // Fullscreen always keeps the minimised card's compact row and spacing.
+    const positioned = !this._fullscreen && !this._recordingMode;
     // View controls name their next action, so only presets expose a pressed state.
-    return html`<button
-      class="overlay-button ${active ? 'active' : ''}"
-      style=${styleMap(buttonStyle(button, size))}
-      title=${label}
-      aria-label=${label}
-      aria-pressed=${preset ? String(active) : nothing}
-      aria-busy=${preset?.pending ? 'true' : nothing}
-      @click=${action}
+    return html`<div
+      class="media-slot"
+      style=${styleMap(positioned ? buttonStyle(button, size) : {})}
     >
-      ${preset?.pending
-        ? pendingIndicator()
-        : html`<ha-icon icon=${active ? button.active_icon : button.icon}></ha-icon>`}
-    </button>`;
+      ${mediaButton({
+        icon: button.icon,
+        activeIcon: button.active_icon,
+        label,
+        onClick: action,
+        active,
+        pressed: preset ? active : undefined,
+        pending: preset?.pending,
+      })}
+    </div>`;
   }
 
   private _renderPresets(
@@ -1212,8 +1229,9 @@ export class CameraCard extends LitElement {
     return html`<ha-card>
       <div
         class="camera ${this._recordingMode ? 'recording-mode' : ''} ${this._fullscreen
-          ? 'fullscreen'
+          ? 'fullscreen family-media-fullscreen'
           : ''}"
+        style=${styleMap(mediaButtonSizeStyle(model.settings.button_size))}
       >
         <div
           class="stream-viewport"
@@ -1262,20 +1280,20 @@ export class CameraCard extends LitElement {
                   ></video>`
                 : nothing
               : !this._elementsReady
-                ? html`<div class="message" role="status">
-                    ${this._elementError || 'Loading camera stream…'}
-                    ${this._elementError
-                      ? html`<button
-                          class="player-action"
-                          type="button"
-                          @click=${() => void this._loadHomeAssistantElements(true)}
-                        >
-                          Retry camera
-                        </button>`
-                      : nothing}
-                  </div>`
+                ? this._elementError
+                  ? html`<div class="family-media-message" role="status">
+                      <span>${this._elementError}</span>
+                      <button
+                        class="player-action"
+                        type="button"
+                        @click=${() => void this._loadHomeAssistantElements(true)}
+                      >
+                        Retry camera
+                      </button>
+                    </div>`
+                  : mediaMessage('Loading camera stream…')
                 : !stateObj
-                  ? html`<div class="message">Camera entity not found: ${entity}</div>`
+                  ? mediaMessage(`Camera entity not found: ${entity}`)
                   : canAttemptWebRTC
                     ? html`${keyed(
                         `${entity}:webrtc`,
@@ -1312,12 +1330,11 @@ export class CameraCard extends LitElement {
                         : nothing} `
                     : stateObj.state === 'unavailable' ||
                         stateObj.attributes.restored === true
-                      ? html`<div class="message">${pair.title} is unavailable</div>`
+                      ? mediaMessage(`${pair.title} is unavailable`)
                       : webRTC
-                        ? html`<div class="message">
-                            This entity does not advertise live streaming. Select
-                            Automatic playback or a stream-enabled camera.
-                          </div>`
+                        ? mediaMessage(
+                            'This entity does not advertise live streaming. Select Automatic playback or a stream-enabled camera.',
+                          )
                         : html`<ha-camera-stream
                             .hass=${this.hass}
                             .stateObj=${stateObj}
@@ -1325,45 +1342,26 @@ export class CameraCard extends LitElement {
                             .muted=${true}
                           ></ha-camera-stream>`}
             ${this._recordingMode && this._recordingLoading
-              ? html`<div class="message recording-loading">Loading recording…</div>`
+              ? mediaMessage('Loading recording…', { className: 'recording-loading' })
               : nothing}
           </div>
           ${model.cameras.length > 1
-            ? html`
-                <button
-                  class="navigation previous"
-                  title="Previous camera"
-                  aria-label="Previous camera"
-                  @click=${() => this._selectCamera(-1)}
-                >
-                  <ha-icon icon="mdi:chevron-left"></ha-icon>
-                </button>
-                <button
-                  class="navigation next"
-                  title="Next camera"
-                  aria-label="Next camera"
-                  @click=${() => this._selectCamera(1)}
-                >
-                  <ha-icon icon="mdi:chevron-right"></ha-icon>
-                </button>
-              `
+            ? mediaNavigation({
+                onPrevious: () => this._selectCamera(-1),
+                onNext: () => this._selectCamera(1),
+              })
             : nothing}
         </div>
-        <div class="view-controls">
-          ${this._renderControls(pair, model)}
-          ${this._fullscreen && this._mediaZoom.state.scale > 1
-            ? html`<button
-                class="zoom-reset"
-                aria-label="Reset zoom"
-                @click=${this._resetZoom}
-              >
-                ${formatHassNumber(this.hass, this._mediaZoom.state.scale, {
-                  digits: 1,
-                })}×
-                <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
-              </button>`
-            : nothing}
-        </div>
+        ${mediaControls(this._renderControls(pair, model), {
+          className: 'view-controls',
+        })}
+        ${this._fullscreen
+          ? mediaZoomReset({
+              hass: this.hass,
+              scale: this._mediaZoom.state.scale,
+              onClick: () => this._resetZoom(),
+            })
+          : nothing}
         ${this._recordingMode ? this._renderRecordingPlayer(pair) : nothing}
         ${!this._recordingMode && presetGroup?.device_id
           ? html`<div class="preset-row" role="group" aria-label="Camera presets">
@@ -1391,6 +1389,7 @@ export class CameraCard extends LitElement {
     familyStyles,
     componentStyles,
     mediaFullscreenStyles,
+    mediaControlStyles,
     css`
       :host {
         display: block;
@@ -1464,113 +1463,58 @@ export class CameraCard extends LitElement {
         flex-shrink: 0;
         background: var(--ha-card-background, #252836);
       }
-      .recording-mode .view-controls button {
-        position: static;
-        transform: none;
-        flex: 0 0 44px;
+
+      /* The shared row (mediaControls) is the layout for minimised cards up to
+         600px and for fullscreen at any width. Slots are layout-only there. */
+      .media-slot {
+        display: contents;
       }
-      .zoom-reset {
+      .preset-row {
         position: absolute;
-        left: 8px;
-        top: 8px;
-        z-index: 4;
-        min-height: 44px;
-        border-radius: 12px;
-        padding: 0 10px;
-        background: rgba(0, 0, 0, 0.65);
+        right: var(--family-media-inset-right, 8px);
+        bottom: var(--family-media-inset-bottom, 8px);
+        left: var(--family-media-inset-left, 8px);
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: safe center;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 2px;
       }
-      @container (max-width: 600px) {
-        .preset-row {
-          position: absolute;
-          bottom: 8px;
-          left: 8px;
-          right: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: safe center;
-          gap: 8px;
-          overflow-x: auto;
-          padding: 2px;
-          z-index: 3;
-        }
-        .preset-row .overlay-button {
+
+      /* Existing desktop configurations: a non-fullscreen card wider than 600px
+         keeps the configured percentage positions (inline --media-slot-*). */
+      @container (width > 600px) {
+        .camera:not(.fullscreen):not(.recording-mode) .view-controls,
+        .camera:not(.fullscreen) .preset-row {
           position: static;
-          transform: none;
-          flex: 0 0 auto;
+          display: block;
+          overflow: visible;
+          padding: 0;
         }
-        .view-controls {
+        .camera:not(.fullscreen):not(.recording-mode) .media-slot {
           position: absolute;
-          top: 8px;
-          left: 8px;
-          right: 8px;
-          display: flex;
-          justify-content: flex-end;
-          gap: 8px;
+          top: var(--media-slot-top);
+          left: var(--media-slot-left);
           z-index: 3;
-        }
-        .view-controls .overlay-button {
-          position: static;
-          transform: none;
-          flex: 0 0 auto;
+          display: block;
+          width: var(--family-media-button-size);
+          height: var(--family-media-button-size);
+          transform: translate(-50%, -50%);
+          pointer-events: auto;
         }
       }
 
-      /* Embedded cards already sit inside HA's safe area. Only fullscreen
-         controls need to avoid the device notch and home indicator; HA's
-         --safe-area-inset-* is read alongside the browser's env() values. */
-      .fullscreen {
-        --focused-safe-top: max(
-          8px,
-          var(--safe-area-inset-top, 0px),
-          env(safe-area-inset-top, 0px)
-        );
-        --focused-safe-right: max(
-          8px,
-          var(--safe-area-inset-right, 0px),
-          env(safe-area-inset-right, 0px)
-        );
-        --focused-safe-bottom: max(
-          8px,
-          var(--safe-area-inset-bottom, 0px),
-          env(safe-area-inset-bottom, 0px)
-        );
-        --focused-safe-left: max(
-          8px,
-          var(--safe-area-inset-left, 0px),
-          env(safe-area-inset-left, 0px)
-        );
-      }
-      .fullscreen:not(.recording-mode) .view-controls,
-      .fullscreen .zoom-reset {
-        top: var(--focused-safe-top);
-      }
-      .fullscreen .zoom-reset {
-        left: var(--focused-safe-left);
-      }
-      .fullscreen .navigation.previous {
-        left: var(--focused-safe-left);
-      }
-      .fullscreen .navigation.next {
-        right: var(--focused-safe-right);
-      }
+      /* Embedded cards already sit inside HA's safe area. In fullscreen the shared
+         --family-media-inset-* values also read HA's and the browser's insets. */
       .fullscreen.recording-mode .view-controls {
-        padding-right: var(--focused-safe-right);
-        padding-left: var(--focused-safe-left);
+        padding-right: var(--family-media-inset-right);
+        padding-left: var(--family-media-inset-left);
       }
       .fullscreen .recording-player {
-        margin: 8px var(--focused-safe-right) var(--focused-safe-bottom)
-          var(--focused-safe-left);
-      }
-      @container (max-width: 600px) {
-        .fullscreen .preset-row {
-          right: var(--focused-safe-right);
-          bottom: var(--focused-safe-bottom);
-          left: var(--focused-safe-left);
-        }
-        .fullscreen:not(.recording-mode) .view-controls {
-          right: var(--focused-safe-right);
-          left: var(--focused-safe-left);
-        }
+        margin: 8px var(--family-media-inset-right) var(--family-media-inset-bottom)
+          var(--family-media-inset-left);
       }
 
       ha-camera-stream,
@@ -1603,16 +1547,6 @@ export class CameraCard extends LitElement {
         background: black;
       }
 
-      .message {
-        position: absolute;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-        color: var(--secondary-text-color, #bdbdbd);
-        text-align: center;
-      }
-
       .recording-loading {
         z-index: 1;
         pointer-events: none;
@@ -1632,89 +1566,6 @@ export class CameraCard extends LitElement {
         outline: 3px solid var(--primary-color);
         outline-offset: -3px;
       }
-      .overlay-button {
-        position: absolute;
-        z-index: 3;
-        display: grid;
-        place-items: center;
-        padding: 0;
-        transform: translate(-50%, -50%);
-        border-radius: var(--tile-border-radius, 12px);
-        background: rgba(0, 0, 0, 0.42);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(4px);
-      }
-
-      .overlay-button.active {
-        background: var(--primary-color, #03a9f4);
-      }
-
-      /* The primary fill means "on"; keep the focus ring visible against it. */
-      .overlay-button.active:focus-visible {
-        outline-color: var(--text-primary-color, white);
-      }
-
-      /* The selected preset also gets a ring, so it is not shown by colour alone. */
-      .overlay-button[aria-pressed='true'] {
-        box-shadow:
-          inset 0 0 0 2px var(--text-primary-color, white),
-          0 1px 3px rgba(0, 0, 0, 0.3);
-      }
-
-      /* The white focus outline would only thicken that ring, so add a dark band
-         inside it. Kept inset because the mobile preset row clips overflow. */
-      .overlay-button[aria-pressed='true']:focus-visible {
-        box-shadow:
-          inset 0 0 0 3px var(--text-primary-color, white),
-          inset 0 0 0 6px rgba(0, 0, 0, 0.6),
-          0 1px 3px rgba(0, 0, 0, 0.3);
-      }
-
-      .overlay-button ha-icon {
-        --mdc-icon-size: var(--focused-icon-size);
-      }
-
-      .navigation {
-        position: absolute;
-        top: 50%;
-        z-index: 2;
-        display: grid;
-        width: 44px;
-        height: 44px;
-        place-items: center;
-        padding: 0;
-        transform: translateY(-50%);
-        border-radius: 50%;
-        background: rgba(0, 0, 0, 0.25);
-      }
-
-      .navigation:focus-visible {
-        background: rgba(0, 0, 0, 0.55);
-      }
-
-      /* Touch devices keep :hover after a tap; a distinct darker scrim keeps a
-         switched-off toggle from looking on. */
-      @media (hover: hover) {
-        .overlay-button:not(.active):hover {
-          background: rgba(0, 0, 0, 0.62);
-        }
-        .navigation:hover {
-          background: rgba(0, 0, 0, 0.55);
-        }
-      }
-
-      .navigation.previous {
-        left: 8px;
-      }
-
-      .navigation.next {
-        right: 8px;
-      }
-
-      .navigation ha-icon {
-        --mdc-icon-size: 32px;
-      }
-
       .error {
         position: absolute;
         right: 8px;

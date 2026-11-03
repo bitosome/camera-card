@@ -130,9 +130,9 @@ describe('shared in-place fullscreen fallback', () => {
     expect(card.shadowRoot!.querySelector('dialog')).toBeNull();
     expect(document.documentElement.style.overflow).toBe('hidden');
     expect(
-      card
-        .shadowRoot!.querySelector('[aria-label="Exit fullscreen"] ha-icon')
-        ?.getAttribute('icon'),
+      card.shadowRoot!.querySelector<HTMLElement & { icon?: string }>(
+        '[aria-label="Exit fullscreen"] ha-icon',
+      )?.icon,
     ).toBe('mdi:fullscreen-exit');
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -185,8 +185,8 @@ it('keeps a configured active fullscreen icon', async () => {
     .click();
   await settled(card);
   expect(
-    card
-      .shadowRoot!.querySelector('[aria-label="Exit fullscreen"] ha-icon')
-      ?.getAttribute('icon'),
+    card.shadowRoot!.querySelector<HTMLElement & { icon?: string }>(
+      '[aria-label="Exit fullscreen"] ha-icon',
+    )?.icon,
   ).toBe('mdi:arrow-collapse-all');
 });

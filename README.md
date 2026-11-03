@@ -95,7 +95,9 @@ The complete row is constrained as a group, preserving equal configured spacing 
 keeping every icon inside the camera surface.
 
 Position fields can be emptied while typing. Values are interpreted as percentages of
-the camera surface when the card renders. The fullscreen active icon exits fullscreen
+the camera surface on cards wider than 600px. Narrower cards and fullscreen always use
+the compact top-right row of the shared `@bitosome/ha-card-ui` media overlay: buttons
+8px from the edges and 8px apart, with presets in a bottom row. The fullscreen active icon exits fullscreen
 when clicked, including when the browser requires the mobile fallback.
 
 ### Recordings
@@ -226,7 +228,9 @@ long notice and landscape fullscreen for clipping, overlap and undersized contro
 
 On cards up to 600px wide, PTZ presets use a centered horizontal row with fixed
 44px-or-larger targets. Long rows scroll horizontally; desktop percentage positions
-remain configurable. In recordings mode the navigation, view controls and timeline
+remain configurable for wider cards. Fullscreen keeps exactly the minimised card's
+button row, button size and spacing at any screen width; only the insets grow to
+clear notches and the home indicator. The printer card renders the same shared overlay. In recordings mode the navigation, view controls and timeline
 are below the video, allowing the card to grow instead of covering the footage.
 
 In fullscreen, pinch with two fingers to magnify the stream locally (1–5×), then

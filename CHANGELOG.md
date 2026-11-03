@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.0 — 2026-11-03
+
+- Bundles shared UI 1.6.0 and renders the view controls, PTZ presets, zoom reset,
+  camera arrows and status messages with its shared media overlay, so the printer
+  card's camera stream shows exactly the same buttons, sizes and spacing.
+- The fullscreen button exits fullscreen again on desktop. Inside Home Assistant the
+  browser only reports the outermost dashboard element as fullscreen, so the card
+  did not recognise its own fullscreen and ignored the second press. It now resolves
+  the real owner through nested shadow roots and no longer uses `screenfull`.
+- Fullscreen keeps the minimised card's top-right button row, button size and 8px
+  spacing at any width, with presets in the bottom row, instead of switching to
+  percentage positions on wide screens. Only the insets grow for notches and the
+  home indicator. Percentage positions still apply to non-fullscreen cards wider
+  than 600px.
+
 ## 1.7.0 — 2026-11-03
 
 - Bundles `@bitosome/ha-card-ui` 1.4.0 and uses its shared status colours,

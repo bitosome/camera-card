@@ -23,6 +23,24 @@ for (const tag of ['ha-camera-stream', 'ha-web-rtc-player']) {
   if (!customElements.get(tag)) customElements.define(tag, class extends HTMLElement {});
 }
 
+const cardCss = () =>
+  (CameraCard.styles as { cssText: string }[])
+    .map((style) => style.cssText)
+    .join('\n')
+    .replace(/\s+/g, ' ');
+
+const cameraHass = () =>
+  ({
+    states: {
+      'camera.main': {
+        entity_id: 'camera.main',
+        state: 'streaming',
+        attributes: {},
+      },
+    },
+    callService: vi.fn(),
+  }) as unknown as HomeAssistant;
+
 describe('focused card', () => {
   it('calls the UniFi Protect preset service directly', async () => {
     const callService = vi.fn().mockResolvedValue(undefined);
@@ -309,14 +327,201 @@ describe('focused card', () => {
   });
 
   it('gives the focused selected preset a ring distinct from the pressed ring', () => {
-    const css = (CameraCard.styles as { cssText: string }[])
-      .map((style) => style.cssText)
-      .join('\n')
-      .replace(/\s+/g, ' ');
-    const rule = css.match(
-      /\.overlay-button\[aria-pressed='true'\]:focus-visible \{([^}]*)\}/,
+    const rule = cardCss().match(
+      /\.family-media-button\[aria-pressed="true"\]:focus-visible \{([^}]*)\}/,
     );
     expect(rule?.[1]).toContain('inset 0 0 0 6px');
+    // The shared overlay owns the button visuals; the card no longer duplicates them.
+    expect(cardCss()).not.toContain('.overlay-button');
+    expect(cardCss()).not.toMatch(/\.navigation[\s.{]/);
+    expect(cardCss()).not.toContain('.zoom-reset');
+  });
+
+  it('enters and exits fullscreen when Home Assistant reports an outer host', async () => {
+    const card = new CameraCard();
+    card.hass = cameraHass();
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+    });
+    // Inside HA the document only reports the outermost shadow host; the card's
+    // own root is the one that reports the card itself.
+    const outer = document.createElement('div');
+    const outerRoot = outer.attachShadow({ mode: 'open' });
+    outerRoot.append(card);
+    document.body.append(outer);
+    let active = false;
+    const changed = () => document.dispatchEvent(new Event('fullscreenchange'));
+    Object.defineProperties(document, {
+      fullscreenEnabled: { configurable: true, get: () => true },
+      fullscreenElement: { configurable: true, get: () => (active ? outer : null) },
+      exitFullscreen: {
+        configurable: true,
+        value: vi.fn(async () => {
+          active = false;
+          changed();
+        }),
+      },
+    });
+    Object.defineProperty(outerRoot, 'fullscreenElement', {
+      configurable: true,
+      get: () => (active ? card : null),
+    });
+    const request = vi.fn(async () => {
+      active = true;
+      changed();
+    });
+    Object.defineProperty(card, 'requestFullscreen', {
+      configurable: true,
+      value: request,
+    });
+    try {
+      await card.updateComplete;
+      card.shadowRoot
+        ?.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')
+        ?.click();
+      await vi.waitFor(() =>
+        expect(
+          card.shadowRoot?.querySelector('[aria-label="Exit fullscreen"]'),
+        ).not.toBeNull(),
+      );
+      expect(request).toHaveBeenCalledOnce();
+      expect(document.fullscreenElement).toBe(outer);
+      expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+      expect(
+        card.shadowRoot?.querySelector('.camera.fullscreen.family-media-fullscreen'),
+      ).not.toBeNull();
+
+      card.shadowRoot
+        ?.querySelector<HTMLButtonElement>('[aria-label="Exit fullscreen"]')
+        ?.click();
+      await vi.waitFor(() =>
+        expect(
+          card.shadowRoot?.querySelector('[aria-label="Enter fullscreen"]'),
+        ).not.toBeNull(),
+      );
+      expect(document.exitFullscreen).toHaveBeenCalledOnce();
+      expect(active).toBe(false);
+      expect(card.shadowRoot?.querySelector('.camera.fullscreen')).toBeNull();
+      expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+    } finally {
+      outer.remove();
+      for (const key of ['fullscreenEnabled', 'fullscreenElement', 'exitFullscreen']) {
+        delete (document as unknown as Record<string, unknown>)[key];
+      }
+    }
+  });
+
+  it('drops a stale fullscreen state when a detached card is reattached', async () => {
+    const card = new CameraCard();
+    card.hass = cameraHass();
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+    });
+    let active = false;
+    Object.defineProperties(document, {
+      fullscreenEnabled: { configurable: true, get: () => true },
+      fullscreenElement: { configurable: true, get: () => (active ? card : null) },
+    });
+    Object.defineProperty(card, 'requestFullscreen', {
+      configurable: true,
+      value: vi.fn(async () => {
+        active = true;
+        document.dispatchEvent(new Event('fullscreenchange'));
+      }),
+    });
+    document.body.append(card);
+    try {
+      await card.updateComplete;
+      card.shadowRoot
+        ?.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')
+        ?.click();
+      await vi.waitFor(() =>
+        expect(card.shadowRoot?.querySelector('.camera.fullscreen')).not.toBeNull(),
+      );
+      // The browser leaves fullscreen for a removed element; its event reaches
+      // nobody because the card already removed its listener.
+      card.remove();
+      active = false;
+      document.body.append(card);
+      await card.updateComplete;
+      expect(card.shadowRoot?.querySelector('.camera.fullscreen')).toBeNull();
+      expect(
+        card.shadowRoot?.querySelector('[aria-label="Enter fullscreen"]'),
+      ).not.toBeNull();
+    } finally {
+      card.remove();
+      for (const key of ['fullscreenEnabled', 'fullscreenElement']) {
+        delete (document as unknown as Record<string, unknown>)[key];
+      }
+    }
+  });
+
+  it('keeps the minimised compact button row and spacing in fullscreen', async () => {
+    const card = new CameraCard();
+    card.hass = cameraHass();
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [
+        { camera_entity: 'camera.main', dependencies: { cameras: ['hd'] } },
+        { camera_entity: 'camera.main', id: 'hd' },
+      ],
+      focused: {
+        button_size: 50,
+        preset_groups: [
+          {
+            camera: 'camera.main',
+            device_id: 'device-1',
+            presets: [{ name: 'Home', icon: 'mdi:home' }],
+          },
+        ],
+      },
+    });
+    document.body.append(card);
+    await card.updateComplete;
+    const root = card.shadowRoot!;
+    const camera = root.querySelector<HTMLElement>('.camera')!;
+    expect(camera.style.getPropertyValue('--family-media-button-size')).toBe('50px');
+    expect(camera.style.getPropertyValue('--family-media-icon-size')).toBe('28px');
+    // Minimised: the slots carry the desktop percentage positions, which only a
+    // card wider than 600px applies.
+    const slots = () => [...root.querySelectorAll<HTMLElement>('.media-slot')];
+    expect(slots().length).toBeGreaterThan(1);
+    for (const slot of slots()) {
+      expect(slot.style.getPropertyValue('--media-slot-left')).toContain('%');
+      expect(slot.style.getPropertyValue('--media-slot-top')).toContain('%');
+    }
+
+    root.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')!.click();
+    await Promise.resolve();
+    await card.updateComplete;
+    expect(camera.classList.contains('family-media-fullscreen')).toBe(true);
+    const row = root.querySelector('.family-media-controls.view-controls')!;
+    expect(row.getAttribute('role')).toBe('toolbar');
+    for (const label of ['Use HD stream', 'View recordings', 'Exit fullscreen']) {
+      const button = root.querySelector(`[aria-label="${label}"]`)!;
+      expect(button.classList.contains('family-media-button')).toBe(true);
+      expect(button.closest('.family-media-controls')).toBe(row);
+      expect(button.hasAttribute('data-media-control')).toBe(true);
+    }
+    expect(root.querySelector('.preset-row [aria-label="Home"]')).not.toBeNull();
+    // No inline percentage position governs any button in fullscreen.
+    for (const slot of slots()) {
+      expect(slot.getAttribute('style') ?? '').toBe('');
+    }
+    // Only a non-fullscreen card wider than 600px positions the slots.
+    const css = cardCss();
+    expect(css).toMatch(/\.media-slot \{ display: contents; \}/);
+    const positioned = [
+      ...css.matchAll(/([^{}]*\.media-slot) \{[^}]*position: absolute/g),
+    ];
+    expect(positioned.length).toBeGreaterThan(0);
+    for (const [, selector] of positioned) {
+      expect(selector).toContain('.camera:not(.fullscreen)');
+    }
+    expect(css).toContain('@container (width > 600px)');
+    card.remove();
   });
 
   it('formats the fullscreen zoom scale with the Home Assistant number locale', async () => {

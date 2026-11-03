@@ -156,7 +156,7 @@
       const tops = new Set(actions.map((action) => action.getBoundingClientRect().top));
       if (camera.width <= 480 && tops.size !== 2)
         errors.push('narrow toolbar should have two rows');
-      for (const control of root.querySelectorAll('.overlay-button')) {
+      for (const control of root.querySelectorAll('.family-media-button')) {
         if (control.getBoundingClientRect().bottom > rect.top)
           errors.push('toolbar covers top action');
       }
