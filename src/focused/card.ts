@@ -17,7 +17,13 @@ import {
 } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
-import { familyStyles, UI_ICONS } from '../shared/card-primitives.js';
+import {
+  componentStyles,
+  familyStyles,
+  formatHassNumber,
+  pendingIndicator,
+  UI_ICONS,
+} from '../shared/card-primitives.js';
 import { designTokens } from '../shared/design-tokens.js';
 import { keyed } from 'lit/directives/keyed.js';
 import screenfull from 'screenfull';
@@ -346,6 +352,9 @@ export class CameraCard extends LitElement {
 
   @state()
   private _activePresets: Record<string, string> = {};
+
+  @state()
+  private _pendingPresets: Record<string, string> = {};
 
   @state()
   private _recordingMode = false;
@@ -829,12 +838,20 @@ export class CameraCard extends LitElement {
     if (!this.hass) {
       return;
     }
+    this._pendingPresets = { ...this._pendingPresets, [group.camera]: preset };
     try {
       await callUniFiPreset(this.hass, group.device_id, preset);
       this._activePresets = { ...this._activePresets, [group.camera]: preset };
       this._error = '';
     } catch (error) {
       this._error = error instanceof Error ? error.message : 'Preset action failed.';
+    } finally {
+      // A later tap owns the indicator until its own call settles.
+      if (this._pendingPresets[group.camera] === preset) {
+        const pending = { ...this._pendingPresets };
+        delete pending[group.camera];
+        this._pendingPresets = pending;
+      }
     }
   }
 
@@ -844,18 +861,24 @@ export class CameraCard extends LitElement {
     label: string,
     action: () => void,
     active = false,
+    preset?: { pending: boolean },
   ): TemplateResult | typeof nothing {
     if (!button.enabled) {
       return nothing;
     }
+    // View controls name their next action, so only presets expose a pressed state.
     return html`<button
       class="overlay-button ${active ? 'active' : ''}"
       style=${styleMap(buttonStyle(button, size))}
       title=${label}
       aria-label=${label}
+      aria-pressed=${preset ? String(active) : nothing}
+      aria-busy=${preset?.pending ? 'true' : nothing}
       @click=${action}
     >
-      <ha-icon icon=${active ? button.active_icon : button.icon}></ha-icon>
+      ${preset?.pending
+        ? pendingIndicator()
+        : html`<ha-icon icon=${active ? button.active_icon : button.icon}></ha-icon>`}
     </button>`;
   }
 
@@ -886,6 +909,7 @@ export class CameraCard extends LitElement {
         preset.name,
         () => void this._goToPreset(group, preset.name),
         this._activePresets[group.camera] === preset.name,
+        { pending: this._pendingPresets[group.camera] === preset.name },
       ),
     );
   }
@@ -993,7 +1017,7 @@ export class CameraCard extends LitElement {
 
     return html`<div class="recording-player">
       ${this._recordingNotice
-        ? html`<div class="recording-notice" role="status">
+        ? html`<div class="recording-notice" role="alert">
             <span>${this._recordingNotice}</span>
             <button
               title="Dismiss"
@@ -1333,7 +1357,9 @@ export class CameraCard extends LitElement {
                 aria-label="Reset zoom"
                 @click=${this._resetZoom}
               >
-                ${this._mediaZoom.state.scale.toFixed(1)}×
+                ${formatHassNumber(this.hass, this._mediaZoom.state.scale, {
+                  digits: 1,
+                })}×
                 <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
               </button>`
             : nothing}
@@ -1363,6 +1389,7 @@ export class CameraCard extends LitElement {
   static styles = [
     designTokens,
     familyStyles,
+    componentStyles,
     mediaFullscreenStyles,
     css`
       :host {
@@ -1489,14 +1516,60 @@ export class CameraCard extends LitElement {
       }
 
       /* Embedded cards already sit inside HA's safe area. Only fullscreen
-         controls need to avoid the device notch and home indicator. */
+         controls need to avoid the device notch and home indicator; HA's
+         --safe-area-inset-* is read alongside the browser's env() values. */
+      .fullscreen {
+        --focused-safe-top: max(
+          8px,
+          var(--safe-area-inset-top, 0px),
+          env(safe-area-inset-top, 0px)
+        );
+        --focused-safe-right: max(
+          8px,
+          var(--safe-area-inset-right, 0px),
+          env(safe-area-inset-right, 0px)
+        );
+        --focused-safe-bottom: max(
+          8px,
+          var(--safe-area-inset-bottom, 0px),
+          env(safe-area-inset-bottom, 0px)
+        );
+        --focused-safe-left: max(
+          8px,
+          var(--safe-area-inset-left, 0px),
+          env(safe-area-inset-left, 0px)
+        );
+      }
       .fullscreen:not(.recording-mode) .view-controls,
       .fullscreen .zoom-reset {
-        top: max(8px, env(safe-area-inset-top, 0px));
+        top: var(--focused-safe-top);
+      }
+      .fullscreen .zoom-reset {
+        left: var(--focused-safe-left);
+      }
+      .fullscreen .navigation.previous {
+        left: var(--focused-safe-left);
+      }
+      .fullscreen .navigation.next {
+        right: var(--focused-safe-right);
+      }
+      .fullscreen.recording-mode .view-controls {
+        padding-right: var(--focused-safe-right);
+        padding-left: var(--focused-safe-left);
+      }
+      .fullscreen .recording-player {
+        margin: 8px var(--focused-safe-right) var(--focused-safe-bottom)
+          var(--focused-safe-left);
       }
       @container (max-width: 600px) {
         .fullscreen .preset-row {
-          bottom: max(8px, env(safe-area-inset-bottom, 0px));
+          right: var(--focused-safe-right);
+          bottom: var(--focused-safe-bottom);
+          left: var(--focused-safe-left);
+        }
+        .fullscreen:not(.recording-mode) .view-controls {
+          right: var(--focused-safe-right);
+          left: var(--focused-safe-left);
         }
       }
 
@@ -1515,7 +1588,7 @@ export class CameraCard extends LitElement {
         padding: 6px 8px;
         border-radius: var(--tile-border-radius, 12px);
         background: rgba(0, 0, 0, 0.8);
-        color: #ffd180;
+        color: var(--family-warning);
         font-size: 12px;
         pointer-events: none;
       }
@@ -1572,10 +1645,20 @@ export class CameraCard extends LitElement {
         backdrop-filter: blur(4px);
       }
 
-      .overlay-button:hover,
-      .overlay-button:focus-visible,
       .overlay-button.active {
         background: var(--primary-color, #03a9f4);
+      }
+
+      /* The primary fill means "on"; keep the focus ring visible against it. */
+      .overlay-button.active:focus-visible {
+        outline-color: var(--text-primary-color, white);
+      }
+
+      /* The selected preset also gets a ring, so it is not shown by colour alone. */
+      .overlay-button[aria-pressed='true'] {
+        box-shadow:
+          inset 0 0 0 2px var(--text-primary-color, white),
+          0 1px 3px rgba(0, 0, 0, 0.3);
       }
 
       .overlay-button ha-icon {
@@ -1596,9 +1679,19 @@ export class CameraCard extends LitElement {
         background: rgba(0, 0, 0, 0.25);
       }
 
-      .navigation:hover,
       .navigation:focus-visible {
         background: rgba(0, 0, 0, 0.55);
+      }
+
+      /* Touch devices keep :hover after a tap; a distinct darker scrim keeps a
+         switched-off toggle from looking on. */
+      @media (hover: hover) {
+        .overlay-button:not(.active):hover {
+          background: rgba(0, 0, 0, 0.62);
+        }
+        .navigation:hover {
+          background: rgba(0, 0, 0, 0.55);
+        }
       }
 
       .navigation.previous {
@@ -1621,7 +1714,7 @@ export class CameraCard extends LitElement {
         max-width: calc(100% - 16px);
         padding: 6px 10px;
         border-radius: var(--tile-border-radius, 12px);
-        background: var(--error-color, #db4437);
+        background: var(--family-error);
         font-size: 12px;
       }
 
@@ -1693,7 +1786,7 @@ export class CameraCard extends LitElement {
         justify-content: space-between;
         padding: 4px 6px;
         border-radius: var(--tile-border-radius, 12px);
-        background: var(--error-color, #db4437);
+        background: var(--family-error);
         font-size: 12px;
       }
 
@@ -1872,7 +1965,7 @@ export class CameraCard extends LitElement {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--error-color, #db4437);
+        background: var(--family-error);
       }
 
       @media (prefers-reduced-motion: reduce) {

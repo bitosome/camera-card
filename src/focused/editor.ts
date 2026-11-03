@@ -5,6 +5,7 @@ import {
   normalizeFocusedConfig,
   serializeFocusedConfig,
 } from './config.js';
+import { UI_ICONS } from '../shared/card-primitives.js';
 import type {
   FocusedCameraPair,
   FocusedControlGroup,
@@ -397,7 +398,7 @@ export class CameraCardEditor extends LitElement {
               html`<div class="item">
                 <div class="item-header">
                   <span class="handle" title="Drag to reorder">
-                    <ha-icon icon="mdi:drag-horizontal-variant"></ha-icon>
+                    <ha-icon icon=${UI_ICONS.drag}></ha-icon>
                   </span>
                   <div class="item-heading">
                     <strong>${camera.title || `Camera ${index + 1}`}</strong>
@@ -510,7 +511,7 @@ export class CameraCardEditor extends LitElement {
   ): TemplateResult {
     return html`<div class="preset-item">
       <span class="handle" title="Drag to reorder">
-        <ha-icon icon="mdi:drag-horizontal-variant"></ha-icon>
+        <ha-icon icon=${UI_ICONS.drag}></ha-icon>
       </span>
       <div class="preset-form">
         ${this._form(
@@ -820,7 +821,7 @@ export class CameraCardEditor extends LitElement {
     }
 
     ha-icon-button {
-      --ha-icon-button-size: 36px;
+      --ha-icon-button-size: 44px;
       color: var(--secondary-text-color);
     }
 

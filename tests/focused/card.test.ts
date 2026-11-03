@@ -248,6 +248,117 @@ describe('focused card', () => {
     card.remove();
   });
 
+  it('marks the pending and selected PTZ preset without relying on colour', async () => {
+    let finish: () => void = () => undefined;
+    const callService = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const card = new CameraCard();
+    card.hass = {
+      states: {
+        'camera.main': {
+          entity_id: 'camera.main',
+          state: 'streaming',
+          attributes: {},
+        },
+      },
+      callService,
+    } as unknown as HomeAssistant;
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+      focused: {
+        preset_groups: [
+          {
+            camera: 'camera.main',
+            device_id: 'device-1',
+            presets: [
+              { name: 'Home', icon: 'mdi:home' },
+              { name: 'Carport', icon: 'mdi:car' },
+            ],
+          },
+        ],
+      },
+    });
+    document.body.append(card);
+    await card.updateComplete;
+    const preset = (name: string) =>
+      card.shadowRoot?.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`);
+
+    expect(preset('Home')?.getAttribute('aria-pressed')).toBe('false');
+    expect(preset('Home')?.hasAttribute('aria-busy')).toBe(false);
+    preset('Carport')?.click();
+    await card.updateComplete;
+    expect(preset('Carport')?.getAttribute('aria-busy')).toBe('true');
+    expect(preset('Carport')?.querySelector('.family-pending-indicator')).not.toBeNull();
+    expect(preset('Carport')?.getAttribute('aria-pressed')).toBe('false');
+
+    finish();
+    await vi.waitFor(() =>
+      expect(preset('Carport')?.getAttribute('aria-pressed')).toBe('true'),
+    );
+    expect(preset('Carport')?.hasAttribute('aria-busy')).toBe(false);
+    expect(preset('Carport')?.querySelector('.family-pending-indicator')).toBeNull();
+    expect(preset('Home')?.getAttribute('aria-pressed')).toBe('false');
+    // View controls name their next action instead of exposing a pressed state.
+    expect(
+      card.shadowRoot
+        ?.querySelector('[aria-label="Enter fullscreen"]')
+        ?.hasAttribute('aria-pressed'),
+    ).toBe(false);
+    expect(callService).toHaveBeenCalledOnce();
+    card.remove();
+  });
+
+  it('formats the fullscreen zoom scale with the Home Assistant number locale', async () => {
+    const card = new CameraCard();
+    card.hass = {
+      states: {
+        'camera.main': {
+          entity_id: 'camera.main',
+          state: 'streaming',
+          attributes: {},
+        },
+      },
+      locale: { language: 'de' },
+      callService: vi.fn(),
+    } as unknown as HomeAssistant;
+    card.setConfig({
+      type: 'custom:camera-card',
+      cameras: [{ camera_entity: 'camera.main' }],
+    });
+    document.body.append(card);
+    await card.updateComplete;
+    card.shadowRoot
+      ?.querySelector<HTMLButtonElement>('[aria-label="Enter fullscreen"]')
+      ?.click();
+    await Promise.resolve();
+    await card.updateComplete;
+    const surface = card.shadowRoot!.querySelector<HTMLElement>('.stream-viewport')!;
+    Object.defineProperties(surface, {
+      clientWidth: { value: 400 },
+      clientHeight: { value: 200 },
+    });
+    const touch = (type: string, points: number[][]) => {
+      const event = new Event(type, { cancelable: true, bubbles: true });
+      Object.defineProperty(event, 'touches', {
+        value: points.map(([clientX, clientY]) => ({ clientX, clientY })),
+      });
+      surface.dispatchEvent(event);
+    };
+    touch('touchstart', [
+      [100, 100],
+      [200, 100],
+    ]);
+    touch('touchmove', [
+      [50, 100],
+      [250, 100],
+    ]);
+    await card.updateComplete;
+    expect(
+      card.shadowRoot?.querySelector('[aria-label="Reset zoom"]')?.textContent?.trim(),
+    ).toBe('2,0×');
+    card.remove();
+  });
+
   it('resolves and signs a recording URL through Home Assistant', async () => {
     const pause = vi
       .spyOn(HTMLMediaElement.prototype, 'pause')
@@ -375,7 +486,9 @@ describe('focused card', () => {
       ?.dispatchEvent(new Event('error'));
     await card.updateComplete;
     expect(card.shadowRoot?.querySelector('.recording-gap')).not.toBeNull();
-    expect(card.shadowRoot?.querySelector('.recording-notice')).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector('.recording-notice')?.getAttribute('role'),
+    ).toBe('alert');
     expect(
       card.shadowRoot?.querySelectorAll('.recording-player-actions > *'),
     ).toHaveLength(8);
