@@ -9,7 +9,8 @@
   no longer shown by colour alone.
 - Hover styling only applies on devices that can hover and uses a darker scrim
   instead of the "on" fill, so a toggle switched off by tapping no longer looks on.
-  The focus ring stays visible on active buttons.
+  The focus ring stays visible on active buttons, and a focused selected preset
+  adds a dark band inside its ring so focus is distinct from the selection.
 - Fullscreen controls read Home Assistant's safe-area insets as well as the
   browser's. Navigation arrows, the zoom indicator, the mobile control and preset
   rows and the recording player now also keep clear of side and bottom insets.

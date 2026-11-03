@@ -1661,6 +1661,15 @@ export class CameraCard extends LitElement {
           0 1px 3px rgba(0, 0, 0, 0.3);
       }
 
+      /* The white focus outline would only thicken that ring, so add a dark band
+         inside it. Kept inset because the mobile preset row clips overflow. */
+      .overlay-button[aria-pressed='true']:focus-visible {
+        box-shadow:
+          inset 0 0 0 3px var(--text-primary-color, white),
+          inset 0 0 0 6px rgba(0, 0, 0, 0.6),
+          0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+
       .overlay-button ha-icon {
         --mdc-icon-size: var(--focused-icon-size);
       }

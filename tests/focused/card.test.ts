@@ -308,6 +308,17 @@ describe('focused card', () => {
     card.remove();
   });
 
+  it('gives the focused selected preset a ring distinct from the pressed ring', () => {
+    const css = (CameraCard.styles as { cssText: string }[])
+      .map((style) => style.cssText)
+      .join('\n')
+      .replace(/\s+/g, ' ');
+    const rule = css.match(
+      /\.overlay-button\[aria-pressed='true'\]:focus-visible \{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toContain('inset 0 0 0 6px');
+  });
+
   it('formats the fullscreen zoom scale with the Home Assistant number locale', async () => {
     const card = new CameraCard();
     card.hass = {
