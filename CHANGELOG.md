@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.1 — 2026-11-07
+
+- Fullscreen no longer shows a thin line down the left edge (and along the top) on
+  phones. The card itself fills the screen, so Home Assistant's card border stayed
+  around the stream; the card now drops its border, rounded corners and shadow while
+  fullscreen.
+
 ## 1.8.0 — 2026-11-03
 
 - Bundles shared UI 1.6.0 and renders the view controls, PTZ presets, zoom reset,
