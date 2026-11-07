@@ -3,6 +3,7 @@
 Camera Card: live streams, UniFi Protect recordings, PTZ presets. The directory name differs from the remote, **`bitosome/camera-card`**, and the HACS name is "Camera Card".
 
 <!-- workspace-pointer -->
+
 ## Shared workspace rules
 
 Part of the bitosome Home Assistant workspace. Shared rules, access (SSH, ha-mcp) and processes
