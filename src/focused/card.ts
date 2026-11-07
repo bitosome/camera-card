@@ -1226,7 +1226,7 @@ export class CameraCard extends LitElement {
       (group) => group.camera === pair.main,
     );
 
-    return html`<ha-card>
+    return html`<ha-card class=${this._fullscreen ? 'fullscreen' : ''}>
       <div
         class="camera ${this._recordingMode ? 'recording-mode' : ''} ${this._fullscreen
           ? 'fullscreen family-media-fullscreen'
@@ -1396,6 +1396,15 @@ export class CameraCard extends LitElement {
         min-width: 0;
         width: 100%;
         container-type: inline-size;
+      }
+
+      /* The host itself is the fullscreen target, so HA's ha-card frame would
+         otherwise stay around the 100vw stream and show as an edge line. */
+      ha-card.fullscreen {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow: hidden;
       }
 
       ha-card,

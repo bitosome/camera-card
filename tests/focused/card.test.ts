@@ -257,12 +257,15 @@ describe('focused card', () => {
     expect(
       card.shadowRoot?.querySelector('[aria-label="Exit fullscreen"]'),
     ).not.toBeNull();
+    // HA's ha-card border must not frame the stream (a line on the phone's edge).
+    expect(card.shadowRoot?.querySelector('ha-card.fullscreen')).not.toBeNull();
 
     card.shadowRoot
       ?.querySelector<HTMLButtonElement>('[aria-label="Exit fullscreen"]')
       ?.click();
     await card.updateComplete;
     expect(card.hasAttribute('data-media-fullscreen')).toBe(false);
+    expect(card.shadowRoot?.querySelector('ha-card.fullscreen')).toBeNull();
     card.remove();
   });
 
